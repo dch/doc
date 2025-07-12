@@ -1087,6 +1087,76 @@ The last step after updating is to restart the computer so all the changes take 
 # shutdown -r now
 ....
 
+[[pkgbase]]
+== Updating FreeBSD with PkgBase
+PkgBase is a system that allows the base system of FreeBSD to be managed with the link:https://man.freebsd.org/cgi/man.cgi?query=pkg&sektion=8&manpath=freebsd-ports[pkg(8)] package management tool, just like third-party software in the ports and packages collection.
+
+PkgBase replaces:
+
+* .txz distribution sets, which are used for installation of the OS with link:https://man.freebsd.org/cgi/man.cgi?query=bsdinstall&sektion=8&manpath=freebsd-release[bsdinstall(8)]
+
+* link:https://man.freebsd.org/cgi/man.cgi?query=freebsd-update&sektion=8&manpath=freebsd-release[freebsd-update(8)] for updates to the OS.
+
+PkgBase complements crossref:cutting-edge[makeworld,"building and installing from source"].
+
+At the moment PkgBase is considered experimental, but there are official packages since link:https://lists.freebsd.org/archives/freebsd-pkgbase/2023-October/000221.html[October 2023]. 
+
+=== Converting a Host to use PkgBase
+
+The link:https://github.com/FreeBSDFoundation/pkgbasify[pkgbasify] tool, provided by the FreeBSD Foundation, may be used to automatically convert a FreeBSD 14.0 or greater system to use pkgbase.
+
+Follow the simple instructions in the pkgbasify README to download and run the script.
+
+=== Upgrading a Host using PkgBase
+[Warning]
+===
+This is still in developement, so please be careful especially when converting an existing system to use PkgBase.
+===
+
+[cols="10%,10%,40%,40%]
+[===
+[ Branch
+[ Frequency
+[ URL
+[ kmods
+
+[ main 
+[ twice daily - 12:00 and 00:00 UTC
+[ `https://pkg.freebsd.org/${ABI}/base_latest`
+[ `https://pkg.freebsd.org/${ABI}/kmods_latest`
+
+[ main
+[ weekly – Sunday at 12:00 UTC
+[ `https://pkg.freebsd.org/${ABI}/base_weekly`
+[ n.a.
+
+[ stable/14
+[ twice daily – 12:00 and 00:00 UTC
+[ `https://pkg.freebsd.org/${ABI}/base_latest`
+[ `https://pkg.freebsd.org/${ABI}/kmods_latest`
+
+[ stable/14
+[ weekly – Sunday at 12:00 UTC
+[ `https://pkg.freebsd.org/${ABI}/base_weekly`
+[ n.a.
+
+[ releng/14.1
+[ twice daily – 12:00 and 00:00 UTC
+[ `https://pkg.freebsd.org/${ABI}/base_release_1`
+[ n.a.
+
+[ releng/14.2
+[ twice daily – 12:00 and 00:00 UTC
+[ `https://pkg.freebsd.org/${ABI}/base_release_2`
+[ `https://pkg.freebsd.org/${ABI}/kmods_latest_2`
+
+[ releng/14.3
+[ twice daily – 12:00 and 00:00 UTC
+[ `https://pkg.freebsd.org/${ABI}/base_release_3`
+[ `https://pkg.freebsd.org/${ABI}/kmods_latest_3`
+
+Based on link:https://wiki.freebsd.org/PkgBase[Wiki - PkgBase]
+
 [[small-lan]]
 == Tracking for Multiple Machines
 
