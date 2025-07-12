@@ -1088,7 +1088,9 @@ The last step after updating is to restart the computer so all the changes take 
 ....
 
 [[pkgbase]]
-== Updating FreeBSD with PkgBase
+
+== Updating FreeBSD with Base System Packages (PkgBase)
+
 PkgBase is a system that allows the base system of FreeBSD to be managed with the link:https://man.freebsd.org/cgi/man.cgi?query=pkg&sektion=8&manpath=freebsd-ports[pkg(8)] package management tool, just like third-party software in the ports and packages collection.
 
 PkgBase replaces:
