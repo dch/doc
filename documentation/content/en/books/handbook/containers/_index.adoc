@@ -112,3 +112,164 @@ FreeBSD-15.0-RELEASE-amd64-container-image-notoolchain.txz
 FreeBSD-15.0-RELEASE-amd64-container-image-toolchain.txz
 ....
 
+[[containers-naming-tagging]]
+== Container Image Naming and Tagging
+
+=== Introduction
+
+FreeBSD’s official container images are built from base system packages,
+themselves built during the FreeBSD release process, and published to
+public registries.
+
+This guide explains how images are named and tagged, helping you choose
+the right image for your needs, and ensuring you understand the
+implications of each choice, as new images are published, and in some
+cases, mutable tags are amended.
+
+This naming convention aligns with the new base system package naming
+scheme, giving clear provenance between container images and the
+corresponding FreeBSD releases.
+
+[[containers-image-types]]
+=== Available Image Types
+
+Five types of FreeBSD container images are available, for `+amd64+` and
+`+aarch64+` architectures.
+
+
+[[containers-freebsd-static]]
+==== `+freebsd-static+`
+
+The static image is intended as a base image, for a workload which is
+entirely statically linked. It contains no libraries, nor binaries, just
+the supporting files that most applications of this nature require.
+
+* public TLS certificates
+* minimal password file
+* minimal termcap
+* timezone database
+
+Note that it has, by design, a lean footprint, to make a security
+compromise of the container less useful to the attacker. There’s no UNIX
+shell, no command-line tools, no dynamic libraries, nor package manager.
+
+It is the smallest image provided by the FreeBSD project.
+
+[[containers-freebsd-dynamic]]
+==== `+freebsd-dynamic+`
+
+The dynamic image uses the static image as a parent layer, and supports
+using shared libraries, including `+libc+`.
+
+Most FreeBSD software should run without issue with this image, with
+minor changes.
+
+It doesn’t have a shell, rc system, nor a package manager. These
+limitations are additional security, making it awkward for attackers in
+a compromised container to move laterally, or make use of tools that
+were never installed.
+
+[[containers-freebsd-runtime]]
+==== `+freebsd-runtime+`
+
+Again, runtime builds on the preceding dynamic layer, and finally adds
+the minimum that a user would expect - a UNIX shell, rc system, and the
+package manager.
+
+It is the ideal base image for porting existing applications with a
+minimum of changes. Users will need to include additional FreeBSD base
+system libraries, as well as additional packages from the Ports tree.
+
+This is the closest to a typical FreeBSD system, including the
+`+pkg(8)+` tool, allowing users to install, or do, almost anything,
+similar to a non-containerised system.
+
+[[containers-freebsd-notoolchain]]
+==== `+freebsd-notoolchain+`
+
+This base image contains almost all tools one would expect on a typical
+FreeBSD system, excluding those that are directly hardware-related, and
+thus not generally useful within a container, and the compiler and
+related toolchain, as it is quite large.
+
+[[containers-freebsd-toolchain]]
+==== `+freebsd-toolchain+`
+
+The Toolchain base image is the sum of all preceding images, including
+a full compiler and toolchain. It is generally possible to compile
+almost any software for FreeBSD in the same way as a normal non-jailed
+FreeBSD system.
+
+All images follow a consistent naming pattern, derived from the FreeBSD
+release they are based upon.
+
+[[containers-tag-structure]]
+=== Image Tag Structure
+
+
+[[containers-immutable-tags]]
+==== Immutable Tags
+
+Immutable tags never change and are ideal for production systems where
+you need stability and predictability.
+
+These are the most common tags used by the release process. They will
+not change, even after FreeBSD security patches, or errata notices.
+
+They are ideal for base images for software deployments where a high
+degree of reproducibility is expected, even as a trade-off against more
+pro-active security patching.
+
+* `+major.minor+` (e.g., `+14.2+`): Points to a specific FreeBSD RELEASE
+version
+* `+major.minor.pX+` (e.g., `+14.2p1+`): Points to a specific patch
+level of a RELEASE
+* `+major.snapYYYYMMDDHHMMSS+` (e.g., `+14.snap20250325035941+`): a
+snapshot build with timestamp
+
+[[containers-mutable-tags]]
+==== Mutable Tags
+
+Mutable tags are updated over time and are ideal for production, or
+CI/CD systems that always want the latest updates, but still wish to
+align with FreeBSD ABI compatibility.
+
+* `+major+` (e.g. `+15+`) will always be the latest support RELEASE
+version along the 15.x stable ABI
+* `+major.snap+` (e.g., `+15.snap+`) follows the latest developer
+snapshot along the 15.x stable ABI train, will often be in advance of
+official releases, and carries a risk of breakage, incompatibility, or
+other unanticipated issues. This is the most mutable tag, and should be
+used with caution. They are exactly the same as using FreeBSD’s STABLE or
+CURRENT snapshots, as they use those images as their source.
+
+=== When to Use Each Tag Type
+
+==== For Production
+
+Use immutable tags to ensure your environment stays consistent:
+
+* `+freebsd-runtime:15.0+` - pinned to FreeBSD 15.0-RELEASE
+
+When security patches are released, you must explicitly rebuild or
+update with a new image tag.
+
+==== For Continuous Integration and Development
+
+Use mutable tags to automatically get the latest updates:
+
+* `+freebsd-runtime:15+` - always the latest official RELEASE in the
+15.x series
+
+These additional mutable tags will follow the regular published
+snapshots off FreeBSD STABLE and CURRENT. Use these if you want to test
+against what subsequent future releases of FreeBSD may contain, and
+accept occasional breakage or unanticipated changes.
+
+* `+freebsd-runtime:14.snap+` - always the latest build from 14-STABLE
+branch
+* `+freebsd-runtime:15.snap+` - always the latest build from 15-STABLE
+branch
+* `+freebsd-runtime:16.snap+` - always the latest build from 15-CURRENT
+branch
+
