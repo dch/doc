@@ -273,3 +273,2045 @@ branch
 * `+freebsd-runtime:16.snap+` - always the latest build from 15-CURRENT
 branch
 
+[[containers-official-registries]]
+=== Official Registry Locations
+
+Architecture-independent images can be downloaded and directly imported
+into your own registry from the
+https://download.freebsd.org/releases[Official FreeBSD Releases] site,
+or alternatively, pulled from the FreeBSD project’s
+https://hub.docker.com/u/freebsd[Docker Hub], or
+https://github.com/orgs/freebsd/packages[Github Container Registry].
+
+[[podman-intro]]
+== A Brief Introduction to Podman
+
+The Podman Project is an Apache 2.0 licensed container toolkit.
+The podman suite comprises 3 main tools and a number of supporting
+components:
+
+* https://podman.io/[podman] is a daemonless container engine using
+docker-compatible commands, used to run containers.
+* https://buildah.io/[buildah] builds OCI formatted container images.
+* https://github.com/containers/skopeo[skopeo] works with remote OCI
+image registries, to synchronize container stores.
+
+[[podman-preparation]]
+=== Preparing your System for Podman containers
+
+[WARNING]
+====
+If you are running this over ssh, or in a similar remote manner, remember
+to perform these commands in tools such as package:sysutils/screen[],
+package:sysutils/tmux[], or package:net/mosh[], to avoid losing your
+connection while restarting your firewall.
+====
+
+If you don’t have zfs, switch to ufs, and skip later zfs commands:
+
+....
+# sed -I .bak -e 's/driver = "zfs"/driver = "vfs"/' \
+    /usr/local/etc/containers/storage.conf
+....
+
+....
+# zfs create -o mountpoint=/var/db/containers zroot/containers
+# zfs snapshot zroot/containers@empty
+# sysctl net.pf.filter_local=1
+# mount -t fdescfs fdesc /dev/fd
+....
+
+Amend `+sysctl.conf+`, and `+/etc/fstab+` as appropriate, to make the
+above changes permanent.
+
+=== Installing Podman
+
+Only the `+sysutils/podman-suite+` meta-package is required, but if you
+install the additional `+emulators/qemu-user-static+` it is possible to
+build or test images for other architectures such as `+arm64+` on an
+`+amd64+` architecture host.
+
+....
+# pkg install podman-suite emulators/qemu-user-static
+....
+
+* integrate changes from `+/usr/local/etc/containers/pf.conf.sample+`
+into your `+/etc/pf.conf+` setting egress macros appropriately, then
+restart your firewall via `+service pf restart+`
+* the packages install a number of template config files, none of which
+need to be edited immediately. You should review and amend the template
+config files. None of these are initially required though, you can do
+this later:
+
+....
+# pkg list | grep etc/containers/
+/usr/local/etc/containers/pf.conf.sample
+/usr/local/etc/containers/containers.conf.sample
+/usr/local/etc/containers/policy.json.sample
+/usr/local/etc/containers/registries.conf.sample
+/usr/local/etc/containers/storage.conf.sample
+/usr/local/etc/containers/registries.d/default.yaml
+....
+
+[[podman-quick-tour]]
+== A Quick Tour with Podman
+
+[WARNING]
+====
+Contrary to podman/docker on Linux, everything needs to run as root, for
+the moment, as all FreeBSD jails do already.
+====
+
+Now that the necessary tools and firewall rules are in place, fetch the
+officially published images from
+https://www.freebsd.org/releases/14.3R/announce/[14.3-RELEASE], either
+https://download.freebsd.org/releases/OCI-IMAGES/14.3-RELEASE/aarch64/Latest/[aarch64]
+or
+https://download.freebsd.org/releases/OCI-IMAGES/14.3-RELEASE/amd64/Latest/[amd64]
+as appropriate for your system architecture.
+
+[[podman-import-tarballs]]
+=== Import FreeBSD Official Tarballs
+
+While it is much easier to pull these directly from FreeBSD's official
+public container registries, but for the highest level of trust of
+provenance, users should rely on checksums and signatures from official
+FreeBSD Release Announcements, and download them from
+https://freebsd.org/[FreeBSD.org] directly.
+
+[source,shell]
+----
+# export OCIBASE=https://download.freebsd.org/releases/OCI-IMAGES/14.3-RELEASE/amd64/Latest
+# podman load -i=$OCIBASE/FreeBSD-14.3-RELEASE-amd64-container-image-runtime.txz
+Getting image source signatures
+Copying blob bbacfdfbe140 done   |
+Copying config 786f2592a8e1 done   |
+Writing manifest to image destination
+Loaded image: localhost/freebsd-runtime:14.3-RELEASE-amd64
+
+# podman load -i=$OCIBASE/FreeBSD-14.3-RELEASE-amd64-container-image-dynamic.txz
+Getting image source signatures
+Copying blob 4f792ed249ef done   |
+Copying config 7d76b179b1 done   |
+Writing manifest to image destination
+Loaded image: localhost/freebsd-dynamic:14.3-RELEASE-amd64
+
+# podman load -i=$OCIBASE/FreeBSD-14.3-RELEASE-amd64-container-image-static.txz
+Getting image source signatures
+Copying blob 12e282fbf955 done   |
+Copying config 749192a8d9 done   |
+Writing manifest to image destination
+Loaded image: localhost/freebsd-static:14.3-RELEASE-amd64
+----
+
+[[podman-list-images]]
+=== List the Images
+
+[source,shell]
+----
+# podman images
+podman images
+REPOSITORY                 TAG                 IMAGE ID      CREATED       SIZE
+localhost/freebsd-runtime  14.3-RELEASE-amd64  786f2592a8e1  5 months ago  33 MB
+localhost/freebsd-dynamic  14.3-RELEASE-amd64  7d76b179b125  5 months ago  13.6 MB
+localhost/freebsd-static   14.3-RELEASE-amd64  749192a8d953  5 months ago  3.68 MB
+----
+
+Note that:
+
+* the image IDs are identical each time an image is fetched
+* the `+IMAGE_ID+` column matches the hashes reported above when
+importing the images. See `+Copying config ...+` lines to compare.
+
+[[podman-list-layers]]
+=== List the Layers
+
+It is possible to show the layers that comprise an image, showing how
+the `+runtime+` image has 3 components, each one a layer in its own
+right.
+
+....
+podman image tree c5f3e77557a9
+Image ID: c5f3e77557a9
+Tags:     [localhost/freebsd14-runtime:14.3-RELEASE-amd64]
+Size:     35.07MB
+Image Layers
+├── ID: cd53fb07fb66 Size: 5.449MB Top Layer of: [localhost/freebsd14-static:14.3-RELEASE-amd64]
+├── ID: a01d37f7777b Size:  10.4MB Top Layer of: [localhost/freebsd14-dynamic:14.3-RELEASE-amd64]
+└── ID: 36b0c80ca1f7 Size: 19.21MB Top Layer of: [localhost/freebsd14-runtime:14.3-RELEASE-amd64]
+....
+
+For the moment, there is only one `+tag+` associated with this image.
+
+[[podman-trust-but-verify]]
+=== Inspect the Checksums
+
+These sha256 digests can be compared across hosts, to ensure you are
+getting the expected images. In future FreeBSD release announcements,
+these digests will also be published, for convenience.
+
+[source,shell]
+----
+# podmanminimal inspect localhost/freebsd14-runtime:14.3-RELEASE-amd64
+dma
+[
+     {
+          "Id": "c5f3e77557a916c124bfb74bdd982efe0a5749aaba9de0d282703d4634b28839",
+          "Digest": "sha256:b98b8f5438a07e000a156ecb216529d8dfa191448ac3dc1f6add9848b4461d05",
+          "RepoTags": [
+               "localhost/freebsd14-runtime:14.3-RELEASE-amd64"
+          ],
+          "RepoDigests": [
+               "localhost/freebsd14-runtime@sha256:b98b8f5438a07e000a156ecb216529d8dfa191448ac3dc1f6add9848b4461d05"
+          ],
+          "Parent": "ebf7538b22f43206d308fecc12bfebc72beb6d1f0e89ce9d95ed1979583010ee",
+          "Comment": "",
+          "Created": "2024-11-29T10:34:57.587490327Z",
+          "Config": {
+               "Labels": {
+                    "io.buildah.version": "1.36.0"
+               }
+          },
+          "Version": "",
+          "Author": "",
+          "Architecture": "amd64",
+          "Os": "freebsd",
+          "Size": 35067392,
+          "VirtualSize": 35067392,
+          "GraphDriver": {
+               "Name": "zfs",
+               "Data": {
+                    "Dataset": "zroot/containers/36b0c80ca1f71afdd5813c5fbd5b55fe686ec6361df1ff36286f2176be67a3fe",
+                    "Mountpoint": "/var/db/containers/storage/zfs/graph/36b0c80ca1f71afdd5813c5fbd5b55fe686ec6361df1ff36286f2176be67a3fe"
+               }
+          },
+          "RootFS": {
+               "Type": "layers",
+               "Layers": [
+                    "sha256:cd53fb07fb66f2c92709cbc407af686fa53276397762dfb27c040a2f64508000",
+                    "sha256:f709c8f6cb8695415033da5819b83262c51cd9512bddb64e0681c48a61b8723f",
+                    "sha256:357c210f8575c70360e88cfcf3d0c241f7e3fa21669ec55bb935dce361a90585"
+               ]
+          },
+          "Labels": {
+               "io.buildah.version": "1.36.0"
+          },
+          "Annotations": {
+               "org.opencontainers.image.base.digest": "sha256:7c1c45d99ffe8344021227ad651f675ac22eeb39b96c8c6abfe2d0612f4c2ccc",
+               "org.opencontainers.image.base.name": "localhost/freebsd14-dynamic:latest"
+          },
+          "ManifestType": "application/vnd.oci.image.manifest.v1+json",
+          "User": "",
+          "History": [
+               {
+                    "created": "2024-11-29T09:55:25.405122405Z",
+                    "created_by": "/bin/sh"
+               },
+               {
+                    "created": "2024-11-29T10:34:08.010623771Z",
+                    "created_by": "/bin/sh",
+                    "comment": "FROM localhost/freebsd14-static:latest"
+               },
+               {
+                    "created": "2024-11-29T10:34:58.10725353Z",
+                    "created_by": "/bin/sh",
+                    "comment": "FROM localhost/freebsd14-dynamic:latest"
+               }
+          ],
+          "NamesHistory": [
+               "localhost/freebsd14-runtime:14.3-RELEASE-amd64"
+          ]
+     }
+]
+----
+
+[[podman-run]]
+=== Run A Container
+
+This tutorial has been done on a FreeBSD 15.0-RC2 system, which
+conveniently provides a simple way to demonstrate that a container was
+indeed run, as the runtime and userland versions of FreeBSD will be
+different. As the container image does not include the kernel,
+`+freebsd-version -k+` fails, but the userland variation succeeds.
+
+....
+# podman run -it localhost/freebsd-runtime:14.3 /bin/sh
+# uname -a
+FreeBSD 15.0-RC2 FreeBSD 15.0-RC2 releng/15.0-n280961-7bd80d8ee020 GENERIC amd64
+# freebsd-version -k
+freebsd-version: unable to locate kernel
+# freebsd-version -ru
+15.0-CURRENT
+14.3-RELEASE
+# exit
+....
+
+=== Useful Variations and Tips
+
+Almost all of the `+podman run ...+` parameters will also apply to
+`+podman build+`, refer to the excellent podman docs for man:podman-run[1]
+and man:podman-build[1].
+
+Use the `+--rm+` flag to have ephemeral containers clean themselves up
+afterwards.
+
+Use `+podman images -a+` to show all downloaded images in
+`+zroot/containers+`
+
+[source,shell]
+----
+# podman images -a
+REPOSITORY                       TAG   IMAGE ID      CREATED      SIZE
+ghcr.io/freebsd/freebsd-runtime  14.3  6faeb847b6fb  2 weeks ago  31.9 MB
+----
+
+Use `+podman ps -a+` to see running containers:
+
+[source,shell]
+----
+# podman ps -a
+CONTAINER ID  IMAGE                                 COMMAND     CREATED        STATUS        PORTS NAMES
+3123623bef9b  ghcr.io/freebsd/freebsd-runtime:14.3  /bin/sh     4 minutes ago  Up 4 minutes        admiring_brattain
+----
+
+==== Environment Variables
+
+Arbitrary environment variables can be passed in:
+
+....
+# podman run --env FOO=BAR -it --rm ghcr.io/freebsd/freebsd-runtime:14.3
+# echo $FOO
+BAR
+....
+
+==== Mounting Files and Volumes
+
+Both files and volumes can be passed into containers. For example the
+`+runtime+` image doesn’t contain `+which(1)+`, but it can be mounted
+into the container easily:
+
+[source,shell]
+----
+# podman run -it --rm --volume /usr/bin/which \
+    ghcr.io/freebsd/freebsd-runtime:14.3
+# which which
+/usr/bin/which
+# which df
+/bin/df
+----
+
+Or for a very lean image, use the existing `+pkg(8)+` from the host and
+mount it inside the container. We also share the package cache between
+container and host, sneak in an environment variable, and ensure that
+`+/etc/hosts+` is not mounted by podman, as it gets in the way of
+upgrades.
+
+[source,shell]
+----
+# podman run -it --rm \
+    --env ASSUME_ALWAYS_YES=true \
+    --no-hosts \
+    --volume /usr/local/sbin/pkg-static:/bin/pkg-static \
+    --volume /var/cache/pkg \
+    ghcr.io/freebsd/freebsd-static:14.3-beta4
+# pkg bootstrap -r FreeBSD
+Bootstrapping pkg from pkg+https://pkg.FreeBSD.org/FreeBSD:14:amd64/latest, please wait...
+Verifying signature with trusted certificate pkg.freebsd.org.2013102301... done
+[fd343e182fa5] Installing pkg-2.1.2...
+[fd343e182fa5] Extracting pkg-2.1.2: 100%
+
+# pkg update
+Updating FreeBSD repository catalogue...
+[fd343e182fa5] Fetching meta.conf: 100%    179 B   0.2kB/s    00:01
+[fd343e182fa5] Fetching data.pkg: 100%   10 MiB 701.8kB/s    00:15
+Processing entries: 100%
+FreeBSD repository update completed. 36036 packages processed.
+Updating FreeBSD-base repository catalogue...
+[fd343e182fa5] Fetching meta.conf: 100%    179 B   0.2kB/s    00:01
+[fd343e182fa5] Fetching data.pkg: 100%   47 KiB  47.7kB/s    00:01
+Processing entries:   0%
+Processing entries: 100%
+FreeBSD-base repository update completed. 525 packages processed.
+All repositories are up to date.
+
+# pkg info
+FreeBSD-caroot-14.snap20250424064417 SSL Certificates
+FreeBSD-certctl-14.snap20250424064417 SSL Certificate Utility
+FreeBSD-clibs-14.snap20250424064417 Core C Libraries
+FreeBSD-fetch-14.snap20250424064417 Fetch Utility
+FreeBSD-kerberos-lib-14.snap20250424064417 Kerberos Libraries
+FreeBSD-libarchive-14.snap20250424064417 libarchive package
+FreeBSD-libbsm-14.snap20250424064417 libbsm package
+FreeBSD-libbz2-14.snap20250424064417 libbz2 package
+FreeBSD-libexecinfo-14.snap20250424064417 libexecinfo package
+FreeBSD-liblzma-14.snap20250424064417 liblzma package
+FreeBSD-libsqlite3-14.snap20250424064417 libsqlite3 package
+FreeBSD-libucl-14.snap20250424064417 libucl package
+FreeBSD-mtree-14.snap20250424064417 MTREE Files
+FreeBSD-openssl-lib-14.snap20250424064417 OpenSSL Libraries
+FreeBSD-pkg-bootstrap-14.snap20250424064417 pkg bootstrap Utility
+FreeBSD-rc-14.snap20250424064417 RC Scripts
+FreeBSD-runtime-14.snap20250424064417 FreeBSD Base System
+FreeBSD-zoneinfo-14.snap20250424064417 zoneinfo package
+pkg-2.1.2                      Package manager
+
+# pkg install FreeBSD-openssl
+Updating FreeBSD repository catalogue...
+FreeBSD repository is up to date.
+Updating FreeBSD-base repository catalogue...
+FreeBSD-base repository is up to date.
+All repositories are up to date.
+Updating database digests format: 100%
+The following 1 package(s) will be affected (of 0 checked):
+
+New packages to be INSTALLED:
+        FreeBSD-openssl: 14.3.b2.20250512234546 [FreeBSD-base]
+
+Number of packages to be installed: 1
+
+314 KiB to be downloaded.
+[fd343e182fa5] [1/1] Fetching FreeBSD-openssl-14.3.b2.20250512234546.pkg: 100%  314 KiB 321.2kB/s    00:01
+Checking integrity... done (0 conflicting)
+[fd343e182fa5] [1/1] Installing FreeBSD-openssl-14.3.b2.20250512234546...
+[fd343e182fa5] [1/1] Extracting FreeBSD-openssl-14.3.b2.20250512234546: 100%
+
+# pkg upgrade -y
+
+# pkg install -qy lang/python3
+
+#
+----
+
+[source,shell]
+----
+# podman run -it --rm \
+    --volume /etc/fstab:/etc/fstab \
+    --volume /tmp:/var/tmp \
+    --volume /tmp \
+    ghcr.io/freebsd/freebsd-runtime:14.3
+
+# mount -p
+zroot/containers/20fbf0bac55648163e2ee4670d5cae1e59ae9e1fbf189053b1f78bb285acea64 /                     zfs     rw,noatime,nfsv4acls    0 0
+/tmp                    /tmp                    nullfs  rw              0 0
+devfs                   /dev                    devfs   rw              0 0
+/tmp                    /var/tmp                nullfs  rw              0 0
+fdescfs                 /dev/fd                 fdescfs rw              0 0
+/var/run/containers/storage/zfs-containers/d62a58b64233daa4ae2ab9bf9c2782ac0ff4381a04bcceb3ae5895169597da95/userdata/resolv.conf /etc/resolv.conf       nullfs  rw         0 0
+/var/run/containers/storage/zfs-containers/d62a58b64233daa4ae2ab9bf9c2782ac0ff4381a04bcceb3ae5895169597da95/userdata/hosts /etc/hosts           nullfs  rw              0 0
+/var/cache/pkg          /var/cache/pkg          nullfs  rw              0 0
+/var/run/containers/storage/zfs-containers/d62a58b64233daa4ae2ab9bf9c2782ac0ff4381a04bcceb3ae5895169597da95/userdata/.containerenv /var/run/.containerenv       nullfs  rw 0 0
+----
+
+=== Networking & Name Resolution
+
+By default, the Podman Suite of tools will [mount_nullfs(8)] the
+`+/etc/resolv.conf+` and a modified `+/etc/hosts+` from the jail host,
+and a `+.containerenv+` file in `+/var/run+` as well.
+
+For example, the previous container might have the following hosts file:
+
+....
+# /etc/hosts from jail host
+...
+10.88.0.1       host.containers.internal host.docker.internal
+10.88.0.2       4fc13095288f magical_franklin
+....
+
+This hosts file in particular will conflict with base system package
+upgrades, so it is advised to skip this during `+podman build+` runs if
+you plan to do this, but leave it on during production deployment.
+
+[source,shell]
+----
+### don't mount /etc/resolv.conf from host, use a custom DNS server
+# podman run --dns 1.2.3.4  ...
+### Don't mount /etc/hosts from hosts, local containers will be hard to find
+# podman build --no-hosts   ...
+----
+
+== Using Public Registries
+
+While the most secure provenance is downloading the [Oficial FreeBSD
+Releases], there are 2 public Container Registries that are managed by
+the FreeBSD Release and Cluster Admin teams. The images from both places
+are identical, but the registries provide a simpler and more
+container-friendly usage.
+
+It is expected that most users will interact via these registries:
+
+* https://hub.docker.com/u/freebsd[Docker Hub]
+* https://github.com/orgs/freebsd/packages[GitHub Container Registry]
+
+=== Fetching and Running from Public Registries
+
+....
+# podman run -it --rm ghcr.io/freebsd/freebsd-runtime:14.3-beta1
+....
+
+== Building Custom Images
+
+Custom images can be built directly from tarballs (for example those
+from [poudriere image], or official release tarballs), from base system
+packages, from existing tagged images, or boot-strapped from [pkg(8)].
+
+We will look at each of these options.
+
+=== Building Directly Off `+base.txz+`
+
+A custom image can be made from release tarballs using
+http://man.freebsd.org/podman-import[podman import]. The final tagged
+image can be pushed to registries, or modified, and used for further
+image creation.
+
+[source,shell]
+----
+# podman import --os freebsd \
+    --arch arm64 \
+    --message 'Import FreeBSD 14.3-BETA3 base.txz' \
+    https://download.freebsd.org/ftp/releases/arm64/14.3-BETA3/base.txz
+
+Downloading from "https://download.freebsd.org/releases/arm64/14.3-BETA3/base.txz"
+Getting image source signatures
+Copying blob e64068a7ec71 done   |
+Copying config dc9960b6e9 done   |
+Writing manifest to image destination
+sha256:dc9960b6e971b649f933e2a5caa0a087fb81d5aa0b11d9d615e7126e5efd5d63
+
+# podman image ls -a
+REPOSITORY              TAG         IMAGE ID      CREATED         SIZE
+<none>                  <none>      dc9960b6e971  57 seconds ago  848 MB
+
+# podman image tag dc9960b6e971 localhost/freebsd-base:14.3-beta3
+
+# podman image ls -a
+REPOSITORY              TAG         IMAGE ID      CREATED             SIZE
+localhost/freebsd-base  14.3-beta3  dc9960b6e971  About a minute ago  848 MB
+----
+
+This image can be used as a further base.
+
+=== Building from Tagged Images
+
+....
+# Containerfile
+# podman build --no-hosts --squash -t localhost/freebsd-base:14.3-beta3 -f ./Containerfile
+
+FROM ghcr.io/freebsd/freebsd-runtime:14.3-beta3
+RUN sed -EI -e s/quarterly/latest/ /etc/pkg/FreeBSD.conf
+RUN env ASSUME_ALWAYS_YES=yes IGNORE_OS_VERSION=yes pkg bootstrap -r FreeBSD
+RUN pkg update
+RUN pkg install -y FreeBSD-openssl
+RUN pkg upgrade -y
+RUN pkg clean -y
+ENTRYPOINT /bin/sh
+....
+
+....
+# podman build --no-hosts -t localhost/python-www:14.3-beta3 -f /root/containers/python/Containerfile
+
+FROM localhost/freebsd-base:14.3beta3
+RUN pkg install -y lang/python3
+RUN pkg clean -y
+ENTRYPOINT /usr/local/bin/python3 -m http.server
+....
+
+=== Bootstrapping with Base System Packages
+
+== Advanced Usage
+
+=== Daemonising
+
+podman can be enabled as a service to restart automatically after a host
+is rebooted. You can either
+
+....
+# service enable podman
+# service podman start
+# service enable podman_service
+# service podman_service start
+....
+
+or
+
+....
+# sysrc podman_enable=YES
+# service podman start
+# sysrc podman_service_enable=YES
+# service podman_service start
+....
+
+additionally, podman can restart containers after a host is rebooted in
+which case containers need to run with `+--restart=always+` option set
+
+....
+# podman run -d --restart=always my-image
+....
+
+=== Linux containers
+
+It is possible to run many Linux container images using FreeBSD’s Linux
+emulation:
+
+....
+# service linux onestart
+# podman run --rm --os=linux docker.io/alpine cat /etc/os-release | head -1
+Trying to pull docker.io/library/alpine:latest...
+Getting image source signatures
+Copying blob 4abcf2066143 done   |
+Copying config 05455a0888 done   |
+Writing manifest to image destination
+NAME="Alpine Linux"
+....
+
+Just don’t expect miracles from anything that has systemd dependencies,
+or expects to be pid1, or expects to be … Linux.
+
+=== Running a local registry
+
+A registry is a fancy web server for storing and sharing your OCI
+images. NB use `+/etc/rc.conf.d/registry+` for `+rc.conf+` settings, the
+`+rc.d+` script doesn’t match the daemon name.
+
+There is a https://github.com/distribution/distribution[docker-registry]
+port for FreeBSD, while it’s rather old now, it’s still quite sufficient
+for local development or a small organisation, with trivial setup.
+
+https://zotregistry.dev/[Zot Registry] is a modern comprehensive
+registry, providing S3 backends, cluster for redundancy, a precompiled
+FreeBSD binary, but as of yet, does not exist in the FreeBSD ports tree.
+
+....
+# pkg install -r FreeBSD sysutils/docker-registry
+# zfs create zroot/var/db/registry
+# chown -R www:www /var/db/registry
+# sysrc docker_registry_enable=YES
+# sysrc docker_registry_user=www
+# sed -i '' -E -e 's,rootdirectory:.+,rootdirectory: /var/db/registry,' \
+    /usr/local/etc/docker-registry/config.yml
+# touch /usr/local/etc/docker-registry/htpasswd
+# chown -R root:www /usr/local/etc/docker-registry/{config.yml,htpasswd}
+# chmod 0640 /usr/local/etc/docker-registry/{config.yml,htpasswd}
+....
+
+* use SHA256 to create a nice random HTTP secret
+* use http://aspirine.org/htpasswd_en.html & bcrypt to create
+`+htpasswd+` file
+
+____
+There must be a native tool to create these, what options do we have?
+____
+
+....
+# /usr/local/etc/docker-registry/config.yml
+version: 0.1
+log:
+  fields:
+    service: registry
+storage:
+  cache:
+    blobdescriptor: inmemory
+  filesystem:
+    rootdirectory: /var/db/registry
+http:
+  addr: :5000
+  secret: abc123sha256
+  headers:
+    X-Content-Type-Options: [nosniff]
+auth:
+  htpasswd:
+    realm: basic-realm
+    path: /usr/local/etc/docker-registry/htpasswd
+health:
+  storagedriver:
+    enabled: true
+    interval: 10s
+    threshold: 3
+....
+
+* `+sudo service registry start+`
+* watch logs in `+/var/log/docker-registry.log+` for errors
+* run `+curl -vu admin:passwd http://localhost:5000/v2/+` you should get
+a `+200 OK+` response with `+{}+` body
+
+See below for local registry usage.
+
+== Building and Sharing Containers
+
+=== Building a new OCI container from sources
+
+The FreeBSD release tooling provides an `+oci-release+` target to build
+the necessary images for `+podman load+` to use. It requires building
+world, kernel, and base system packages first, so this can take a while.
+
+The following example will build `+amd64+` and `+arm64+` images:
+
+[source,shell]
+----
+# cd /usr/src \
+    && make TARGET_ARCH=aarch64 TARGET=arm64 -s -j32 buildworld \
+    && make TARGET_ARCH=aarch64 TARGET=arm64 KERNCONF=GENERIC -s -j32 buildkernel \
+    && make TARGET_ARCH=aarch64 TARGET=arm64 KERNCONF=GENERIC -s -j32 packages \
+    && cd ./release \
+    && make TARGET_ARCH=aarch64 TARGET=arm64 -j32 -s clean \
+    && make KERNCONF=GENERIC TARGET_ARCH=aarch64 TARGET=arm64 WITH_OCIIMAGES=yes \
+      -s oci-release
+
+# cd /usr/src \
+    && make TARGET_ARCH=amd64 TARGET=amd64 -s -j32 buildworld \
+    && make TARGET_ARCH=amd64 TARGET=amd64 KERNCONF=GENERIC -s -j32 buildkernel \
+    && make TARGET_ARCH=amd64 TARGET=amd64 KERNCONF=GENERIC -s -j32 packages \
+    && cd ./release \
+    && make TARGET_ARCH=amd64 TARGET=amd64 -s -j32 clean \
+    && make KERNCONF=GENERIC TARGET_ARCH=amd64 TARGET=amd64 \
+      WITH_OCIIMAGES=yes -s oci-release
+----
+
+* TODO where do these images sit?
+
+=== Listing Local Images
+
+* note that `+latest+` and `+14.0p6+` tags match up with the same
+`+image id+`
+
+....
+# podman images
+REPOSITORY                     TAG                   IMAGE ID      CREATED        SIZE
+localhost/freebsd14.0-small    14.0p6                6b60451da926  5 hours ago    1.03 kB
+localhost/freebsd14.0-small    latest                6b60451da926  5 hours ago    1.03 kB
+localhost/freebsd14.0-runtime  14.0p6                5faaecc767ad  5 hours ago    1.03 kB
+localhost/freebsd14.0-runtime  latest                5faaecc767ad  5 hours ago    1.03 kB
+localhost/freebsd14.0-base     latest-debug          d57507702c2b  5 hours ago    1.03 kB
+localhost/freebsd14.0-base     14.0p6-debug          d57507702c2b  5 hours ago    1.03 kB
+localhost/freebsd14.0-base     14.0p6                977dfe21ef15  5 hours ago    1.03 kB
+localhost/freebsd14.0-base     latest                977dfe21ef15  5 hours ago    1.03 kB
+localhost/freebsd14.0-static   latest-debug          8964f979748d  5 hours ago    1.03 kB
+localhost/freebsd14.0-static   14.0p6-debug          8964f979748d  5 hours ago    1.03 kB
+localhost/freebsd14.0-static   latest                2018593833af  5 hours ago    1.03 kB
+localhost/freebsd14.0-static   14.0p6                2018593833af  5 hours ago    1.03 kB
+localhost/freebsd14.0-mtree    latest                b91fa618e394  5 hours ago    1.03 kB
+localhost/freebsd14.0-base     latest-aarch64        25e0d6010087  21 hours ago   35.1 MB
+localhost/freebsd14.0-runtime  latest-aarch64        7492fba91606  21 hours ago   61.5 MB
+localhost/freebsd14.0-base     latest-debug-amd64    28358b486bc6  21 hours ago   55.1 MB
+localhost/freebsd14.0-base     latest-debug-aarch64  1b6f8b32ed55  21 hours ago   52.7 MB
+localhost/freebsd14.0-static   latest-debug-amd64    01398919565e  21 hours ago   23.8 MB
+localhost/freebsd14.0-base     latest-amd64          cc353a2011ef  21 hours ago   35.7 MB
+localhost/freebsd14.0-runtime  latest-amd64          ca1f3dd2d649  21 hours ago   62.8 MB
+localhost/freebsd14.0-mtree    latest-amd64          05cfc4ff7d55  21 hours ago   1.17 MB
+localhost/freebsd14.0-static   latest-aarch64        b444483b7b3b  21 hours ago   6.01 MB
+localhost/freebsd14.0-static   latest-amd64          38a855def155  21 hours ago   6.02 MB
+localhost/freebsd14.0-small    latest-amd64          0af3b8c4c2e7  21 hours ago   175 MB
+localhost/freebsd14.0-small    latest-aarch64        31e93be59727  21 hours ago   164 MB
+localhost/freebsd14.0-static   latest-debug-aarch64  392a902558fc  21 hours ago   22 MB
+localhost/freebsd14.0-mtree    latest-aarch64        005682383153  21 hours ago   1.17 MB
+quay.io/dougrabson/hello       latest                f81c971736c6  23 months ago  4.06 MB
+....
+
+=== Create and Run
+
+[TIP]
+=====
+This PC is running a different release to the parent system, but the built container
+is based off a `+14.3-RELEASE+` image, so man:freebsd-version[1] will
+return different results for running kernel vs installed userland.
+=====
+....
+# buildah from ghcr.io/freebsd/freebsd-runtime:14.3
+freebsd-runtime-working-container
+
+# buildah run freebsd-runtime-working-container freebsd-version -ru
+15.0-RELEASE     <------ the host system's kernel
+14.3-RELEASE     <------ the container's userland
+....
+
+This image is made up of multiple layers, only the final one contains
+the main userland. These layers are stored
+
+....
+# podman image tree localhost/freebsd
+Image ID: 4bc70197ea21
+Tags:     [localhost/freebsd14.0-small:latest-amd64]
+Size:     174.8MB
+Image Layers
+├── ID: 1643796dfb88 Size: 1.172MB Top Layer of: [localhost/freebsd14.0-mtree:latest-amd64 localhost/freebsd14.0-mtree:latest-aarch64]
+├── ID: 8a0cc7febb16 Size: 4.847MB Top Layer of: [localhost/freebsd14.0-static:latest-amd64]
+├── ID: 3802ebf80a0f Size: 29.69MB Top Layer of: [localhost/freebsd14.0-base:latest-amd64]
+├── ID: 0c5e170468cb Size: 27.13MB Top Layer of: [localhost/freebsd14.0-runtime:latest-amd64]
+└── ID: 1c354111d4b5 Size:   112MB Top Layer of: [localhost/freebsd14.0-small:latest-amd64]
+....
+
+=== Registries
+
+In general, registries require authentication for push, and optionally
+for pull. Credentials are saved in
+`+/root/.config/containers/auth.json+` by default, if you login, but it
+is also possible to enter the password each time manually, to avoid it
+being stored on the filesystem.
+
+It is recommended that you serve your registry over TLS, behind nginx,
+haproxy, or similar.
+
+=== Github
+
+This container registry is namespaced by github accounts and
+organisations.
+
+==== Organisation Changes
+
+* for each organisation, or user, that you wish to publish packages for,
+enable `+public+`
+https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility[permissions
+in that organisation]
+* set up permissions on your
+https://github.com/organizations/freebsd/settings/packages[github
+organisation] to enable public packages
+image:https://docs.skunkwerks.at/uploads/a4a76703-c178-4a12-8cfc-645909feb236.png[github
+permissions]
+* we will not link packages to repos at this stage, it requires
+automated builds
+
+==== Personal Changes
+
+Each user who can upload, requires a personal access token, or
+https://github.com/settings/tokens[PAT]
+
+* make a PAT, with `+write:packages+` scope permissions, delete is not
+required
+
+.PATs
+image::https://docs.skunkwerks.at/uploads/9c9ea1c5-19f5-437f-997d-44258d17af22.png[PATs]
+
+.make a PAT
+image::https://docs.skunkwerks.at/uploads/000e7c9f-1f5d-4f0d-b0dd-9a96bb253d8d.png[make
+a PAT]
+
+* this can be used to login to the Github Container registry
+* after uploading each package (see below for `+buildah push+`, change
+its visibility to public, and grant the group access
+
+.per-package settings
+image::https://docs.skunkwerks.at/uploads/ac4daf01-156a-48c2-a2c2-43160a499dbe.png[per-package
+settings]
+
+.manage access
+image::https://docs.skunkwerks.at/uploads/95c9652a-bfd3-491b-a7b2-ea0c86cbbd9f.png[manage
+access]
+
+==== Push An Image
+
+....
+# podman login ghcr.io -u dch
+Password:
+Login Succeeded!
+# chown 0600 /root/.config/containers/auth.json
+
+# buildah push ghcr.io/skunkwerks/freebsd14.0-small:14.0p6
+Error: pushing image "ghcr.io/skunkwerks/freebsd14.0-small:14.0p6" to "docker://ghcr.io/skunkwerks/freebsd14.0-small:14.0p6": ghcr.io/skunkwerks/freebsd14.0-small:14.0p6: image not known
+# buildah push freebsd14.0-small:14.0p6  docker://ghcr.io/skunkwerks/freebsd14.0-small:14.0p6
+Getting image source signatures
+Copying blob d6344e14ba8a done   |
+Copying blob aca51be9eadf done   |
+Copying blob 05a151490b6d done   |
+Copying blob 42509cf52690 done   |
+Copying blob a94388b7abab done   |
+Copying config 0af3b8c4c2 done   |
+Writing manifest to image destination
+....
+
+And now let’s push all of the local ones, using fish shell:
+
+....
+# for i in (podman images -n | cut -wf 1 |grep freebsd \
+    sed -e 's,localhost/,,')
+    buildah push $i  docker://ghcr.io/skunkwerks/$i
+  end
+...
+Copying blob a18920fa617e skipped: already exists
+Copying blob 188e5e166924 skipped: already exists
+Copying config 38a855def1 done   |
+Writing manifest to image destination
+Getting image source signatures
+Copying blob a18920fa617e skipped: already exists
+Copying config 05cfc4ff7d done   |
+Writing manifest to image destination```
+....
+
+.published containers
+image::https://docs.skunkwerks.at/uploads/85ab37f7-7787-41f0-b08c-1207c8ea15e1.png[published
+containers]
+
+==== Pull And Run
+
+You don’t need to authenticate to fetch public images.
+
+....
+# buildah from ghcr.io/skunkwerks/freebsd14.0-runtime
+Trying to pull ghcr.io/skunkwerks/freebsd14.0-runtime:latest...
+Getting image source signatures
+Copying blob 31fba944001f done   |
+Copying blob a18920fa617e done   |
+Copying blob 188e5e166924 done   |
+Copying blob 8bf3dc12f14d done   |
+Copying config ca1f3dd2d6 done   |
+Writing manifest to image destination
+freebsd14.0-runtime-working-container
+
+# buildah run freebsd14.0-runtime-working-container freebsd-version -ru
+14.0-RELEASE-p5
+14.0-RELEASE-p6
+
+# buildah run freebsd14.0-runtime-working-container ifconfig
+lo0: flags=1008049<UP,LOOPBACK,RUNNING,MULTICAST,LOWER_UP> metric 0 mtu 16384
+        options=680003<RXCSUM,TXCSUM,LINKSTATE,RXCSUM_IPV6,TXCSUM_IPV6>
+        inet 127.0.0.1 netmask 0xffffff00
+        inet6 ::1 prefixlen 128
+        inet6 fe80::1%lo0 prefixlen 64 scopeid 0xf
+        groups: lo
+        nd6 options=21<PERFORMNUD,AUTO_LINKLOCAL>
+eth0: flags=1008843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST,LOWER_UP> metric 0 mtu 1500
+        options=8<VLAN_MTU>
+        ether 02:55:75:36:69:0b
+        inet 10.88.0.6 netmask 0xffff0000 broadcast 10.88.255.255
+        groups: epair
+        media: Ethernet 10Gbase-T (10Gbase-T <full-duplex>)
+        status: active
+        nd6 options=29<PERFORMNUD,IFDISABLED,AUTO_LINKLOCAL>
+
+# buildah run freebsd14.0-runtime-working-container ping -c 3 100.64.0.1
+PING 100.64.0.1 (100.64.0.1): 56 data bytes
+64 bytes from 100.64.0.1: icmp_seq=0 ttl=64 time=0.197 ms
+64 bytes from 100.64.0.1: icmp_seq=1 ttl=64 time=0.299 ms
+64 bytes from 100.64.0.1: icmp_seq=2 ttl=64 time=0.173 ms
+
+--- 100.64.0.1 ping statistics ---
+3 packets transmitted, 3 packets received, 0.0% packet loss
+round-trip min/avg/max/stddev = 0.173/0.223/0.299/0.055 ms
+
+# buildah run freebsd14.0-runtime-working-container df -h /
+Filesystem                                                                           Size    Used   Avail Capacity  Mounted on
+zroot/containers/1d9516c0e6ae2ba2b83b148d34bfafcb39a28db282778fb0928bf60fa901c23b    961G     33M    961G     0%    /
+....
+
+=== Using Oracle Cloud Registry
+
+* confusingly also named `+OCI+` for funsies, we will call it `+OCR+`
+instead
+* create a registry
+https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/ikedg/using-oci-container-registry.html
+&
+https://docs.oracle.com/en-us/iaas/Content/Registry/Tasks/registrycreatingarepository.htm
+* I recommend disabling auto-repo creation as it gets confusing if
+incorrect names or paths are used for images
+
+....
+$ export CID=ocid1.tenancy.oc1..aaaaaaaaobmlhru...
+$ oci artifacts container repository create \
+    --display-name skunkwerks \
+    --is-public yes \
+    --compartment-id $CID
+....
+
+[source,json]
+----
+{
+  "data": {
+    "billable-size-in-gbs": 0,
+    "compartment-id": "ocid1.tenancy.oc1..aaaaaaaaobml",
+    "created-by": "ocid1.user.oc1..aaaaaaaaodt",
+    "defined-tags": {},
+    "display-name": "skunkwerks",
+    "freeform-tags": {},
+    "id": "ocid1.containerrepo.oc1.eu-amsterdam-1.0.axvxsnomswgi.aaaaaaaakr",
+    "image-count": 0,
+    "is-immutable": false,
+    "is-public": true,
+    "layer-count": 0,
+    "layers-size-in-bytes": 0,
+    "lifecycle-state": "AVAILABLE",
+    "namespace": "axvxsnomswgi",
+    "readme": null,
+    "system-tags": {},
+    "time-created": "2024-04-04T14:55:44.163000+00:00",
+    "time-last-pushed": null
+  },
+  "etag": "ockblikdf5cn7usf46of6dujdikfsa-1"
+}
+----
+
+==== Authenticate
+
+* https://docs.oracle.com/en-us/iaas/Content/Registry/Concepts/registryprerequisites.htm[region-specific
+hostnames]
+** Amsterdam https://eu-amsterdam-1.ocir.io | https://ams.ocir.io
+** Frankfurt https://eu-frankfurt-1.ocir.io | https://fra.ocir.io
+* weird usernames
+`+<tenancy-namespace>/oracleidentitycloudservice/<your@email>+`
+* password is your OCI auth token (a very dangerous secret)
+
+....
+# podman login ams.ocir.io
+Username: axvxsnomswgi/oracleidentitycloudservice/dch@...
+Password: .....
+Login Succeeded!
+....
+
+==== Push Images
+
+As before, this is straightforwards:
+
+....
+# buildah push freebsd14.0-small:14.0p6  docker://ams.ocir.io/axvxsnomswgi/freebsd/freebsd14.0-small:14.0p6
+Getting image source signatures
+Copying blob a94388b7abab done   |
+Copying blob 05a151490b6d done   |
+Copying blob aca51be9eadf done   |
+Copying blob d6344e14ba8a done   |
+Copying blob 42509cf52690 done   |
+Copying config 0af3b8c4c2 done   |
+Writing manifest to image destination
+
+# for i in (podman images -n | cut -wf 1 |grep freebsd | sed -e 's,localhost/freebsd,,'); buildah push freebsd$i docker://ams.ocir.io/axvxsnomswgi/freebsd:$i; end
+...
+Getting image source signatures
+Copying blob 8bf3dc12f14d skipped: already exists
+Copying blob a18920fa617e skipped: already exists
+Copying blob 31fba944001f skipped: already exists
+Copying blob 3ba10043c0e3 skipped: already exists
+Copying blob 188e5e166924 skipped: already exists
+Copying config 0af3b8c4c2 done   |
+Writing manifest to image destination
+....
+
+.populated registry
+image::https://docs.skunkwerks.at/uploads/a9e67b07-e781-4c01-bfb3-f5ee961e6168.png[populated
+registry]
+
+==== Pull And Run
+
+....
+# export c=$(buildah from ams.ocir.io/axvxsnomswgi/freebsd:14.0-small)
+freebsd-working-container
+# buildah run $c df -h /
+Filesystem                                                                           Size    Used   Avail Capacity  Mounted on
+zroot/containers/1d9516c0e6ae2ba2b83b148d34bfafcb39a28db282778fb0928bf60fa901c23b    961G     33M    961G     0%    /
+....
+
+==== Synchronising Registries
+
+As running your own registry is trivial, it’s also possible to
+synchronise the official FreeBSD images into your own one, using skopeo.
+Note that, so long as your `+auth.json+` file is up to date, you do not
+need `+root+` access to sync images.
+
+This example will replicate all FreeBSD-related images in the project’s
+https://hub.docker.com/u/freebsd[Docker Hub] space, to an example local
+registry. Note how some images are skipped as the blobs and metadata are
+already present.
+
+....
+# sync.yml
+docker.io:
+  images:
+    freebsd/freebsd-static: []
+    freebsd/freebsd-dynamic: []
+    freebsd/freebsd-runtime: []
+....
+
+....
+$  skopeo sync --src yaml --dest docker --all sync.yml cr.example.net/freebsd
+INFO[0000] Processing repo                               registry=docker.io repo=freebsd/freebsd-static
+INFO[0000] Querying registry for image tags              registry=docker.io repo=freebsd/freebsd-static
+INFO[0000] Getting tags                                  image=docker.io/freebsd/freebsd-static
+INFO[0001] Processing repo                               registry=docker.io repo=freebsd/freebsd-dynamic
+INFO[0001] Querying registry for image tags              registry=docker.io repo=freebsd/freebsd-dynamic
+INFO[0001] Getting tags                                  image=docker.io/freebsd/freebsd-dynamic
+INFO[0002] Processing repo                               registry=docker.io repo=freebsd/freebsd-full
+INFO[0002] Querying registry for image tags              registry=docker.io repo=freebsd/freebsd-full
+INFO[0002] Getting tags                                  image=docker.io/freebsd/freebsd-full
+ERRO[0003] Error processing repo, skipping               registry=docker.io repo=freebsd/freebsd-full
+ERRO[0003] Error determining repository tags for repo docker.io/freebsd/freebsd-full: fetching tags list: repository name not known to registry
+INFO[0003] Processing repo                               registry=docker.io repo=freebsd/freebsd-runtime
+INFO[0003] Querying registry for image tags              registry=docker.io repo=freebsd/freebsd-runtime
+INFO[0003] Getting tags                                  image=docker.io/freebsd/freebsd-runtime
+INFO[0005] Copying image ref 1/14                        from="docker://freebsd/freebsd-static:14.2" to="docker://example.net/freebsd/freebsd-static:14.2"
+Getting image list signatures
+Copying 2 images generated from 2 images in list
+Copying image sha256:c19237d6f322d08a60be363e9970e48a49d2128a51f72d25459b8dd212eb45b2 (1/2)
+Getting image source signatures
+Skipping: image already present at destination
+Copying image sha256:7b504eef1dfafb069c8e37c7ac6319b0f669a91ea10609e7797694056f29e123 (2/2)
+Getting image source signatures
+Skipping: image already present at destination
+Writing manifest list to image destination
+Storing list signatures
+...
+INFO[0654] Copying image ref 11/14                       from="docker://freebsd/freebsd-runtime:14.snap20250515090110" to="docker://example.net/freebsd/freebsd-runtime:14.snap20250515090110"
+Getting image source signatures
+Skipping: image already present at destination
+INFO[0658] Copying image ref 12/14                       from="docker://freebsd/freebsd-runtime:15.snap" to="docker://example.net/freebsd/freebsd-runtime:15.snap"
+Getting image list signatures
+Copying 2 images generated from 2 images in list
+Copying image sha256:09447d754879ab0e65e417defa40164a6f1ee209c43b1672d0f0998ef4162d48 (1/2)
+Getting image source signatures
+Copying blob aedab320675e done   |
+Copying config 004072d62e done   |
+Writing manifest to image destination
+Copying image sha256:2ab2108686dfe8edcf3f21324efe32ddbc99c4e3b485f4647508d6df50516d26 (2/2)
+Getting image source signatures
+Copying blob 2673b1438530 done   |
+Copying config 69777ab85f done   |
+Writing manifest to image destination
+Writing manifest list to image destination
+Storing list signatures
+INFO[0767] Copying image ref 13/14                       from="docker://freebsd/freebsd-runtime:15.snap20250424035343" to="docker://example.net/freebsd/freebsd-runtime:15.snap20250424035343"
+Getting image source signatures
+Skipping: image already present at destination
+INFO[0769] Copying image ref 14/14                       from="docker://freebsd/freebsd-runtime:15.snap20250515052010" to="docker://example.net/freebsd/freebsd-runtime:15.snap20250515052010"
+Getting image source signatures
+Skipping: image already present at destination
+INFO[0771] Synced 42 images from 3 sources
+....
+
+=== Daemonising Podman
+
+FreeBSD’s podman implementation provides 2 rc services:
+
+* https://cgit.freebsd.org/ports/tree/sysutils/podman/files/podman.in[podman]
+* https://cgit.freebsd.org/ports/tree/sysutils/podman/files/podman_service.in[podman
+service]
+
+The `+podman+` service runs at boot, and ensures that all containers
+marked with `+restart-policy=always+` are started. It doesn’t provide
+contingencies to restart containers in case of failure.
+
+The `+podman_service+` service runs the
+https://man.freebsd.org/podman-system-service[podman API service] that
+provides a REST-flavoured
+https://docs.podman.io/en/latest/_static/api.html[podman API] and
+listens on `+/var/run/podman/podman.sock+` by default.
+
+Enable them as follows:
+
+....
+# sysrc podman_enable=YES
+# sysrc podman_service_enable=YES
+# sysrc podman_service_flags='--time 0'
+....
+
+For convenience at the expense of any security, either:
+
+* `+doas chown -R $USER /var/run/podman/+`
+* add `+tcp:[::]:12345+` for the `+podman_service+` to run on port
+12345, exposing all your containers to the internet
+
+
+== after this it’s …. just messy notes
+
+== TODO
+
+* [x] quick setup & usage
+* [x] setup & using a local repository
+* [x] setup & using a remote repository (GitHub, OCI, .. others? )
+* [ ] document podman runtime hooks
+* [ ] export & import containers as files
+* [ ] using signatures and hashes to verify container provenance
+* [x] using buildah to make custom images
+* {empty}[x] keeping local & remote repositories in sync with
+https://redhat-scholars.github.io/containers-tutorial/containers-tutorial/skopeo.html[skopeo]
+* {empty}[ ] update
+https://freshports.org/sysutils/docker-registry[sysutils/docker-registry]
+* [ ] creating containers in build pipelines (what CI?)
+* [ ] handling multi-arch repos and builds
+* [x] naming things is hard, what makes sense, how do tags relate to
+updates?
+* [ ] how to assign specific IPv4/IPv6 addresses to containers?
+* [ ] attaching custom nested zfs datasets into containers
+* [ ] Create a diagram depicting how all the pieces come together
+** https://github.com/containers/podman[podman]
+** https://github.com/containers/image[image]
+** https://github.com/containers/conmon[conmon]
+** https://github.com/dfr/ocijail[ocijail]
+* [ ] Further topics?
+** [ ] Redo everything using https://github.com/samuelkarp/runj[runj] +
+https://github.com/containerd/containerd[containerd]
+** [ ] Redo everything using https://github.com/samuelkarp/runj[runj] +
+https://github.com/containerd/containerd[containerd] +
+https://github.com/containerd/nerdctl[nerdctl]
+** [ ] What about other FreeBSD distros ?
+*** [ ] HardenedBSD
+* [ ] check licenses of podman-suite ports (GPL vs ALv2)
+* [ ] should the man pages refer to FreeBSD containers? is this a lot of
+effort to maintain over time? Upstream?
+* {empty}[ ] make sure docs/packages/podman are consistent for example
+https://podman.io/docs/installation#installing-on-freebsd-140[Installing
+on FreeBSD 14.0]
+* [ ] support podman rootless mode on FreeBSD (lot of work)
+* [ ] document default and useful configs for
+https://cgit.freebsd.org/ports/tree/sysutils/containers-common[containers-common]
+so that e.g. `+podman search+` finds stuff in registries
+* *Issues*
+** [line-through]#After
+https://podman.io/docs/installation#installing-on-freebsd-140[installing
+podman] and applying the
+https://podman.io/docs/installation#initial-configuration[initial
+configuration] but before configuring
+https://podman.io/docs/installation#networking[networking] and
+https://podman.io/docs/installation#storage[storage], running
+https://docs.podman.io/en/latest/markdown/podman-search.1.html[podman
+search] without adding any registry prefix leads no reults# - See
+*Improvements*
+
+....
+# podman search httpd
+....
+
+=== Find and Fetch
+
+....
+# podman image search --list-tags docker.io/dougrabson/hello
+NAME                        TAG
+docker.io/dougrabson/hello  latest
+....
+
+=== Fetch and Run It
+
+....
+podman run --rmi docker.io/dougrabson/hello
+Trying to pull docker.io/dougrabson/hello:latest...
+Getting image source signatures
+Copying blob b13a5ec7f3d2 done   |
+Copying config f81c971736 done   |
+Writing manifest to image destination
+!... Hello Podman World ...!
+
+         .--"--.
+       / -     - \
+      / (O)   (O) \
+   ~~~| -=(,Y,)=- |
+    .---. /`  \   |~~
+ ~/  o  o \~~~~.----. ~~
+  | =(X)= |~  / (O (O) \
+   ~~~~~~~  ~| =(Y_)=-  |
+  ~~~~    ~~~|   U      |~~
+
+Project:   https://github.com/containers/podman
+Website:   https://podman.io
+Documents: https://docs.podman.io
+Twitter:   @Podman_io
+....
+
+=== Inspect the Stash
+
+....
+# fd -tf . /var/db/containers/storage/
+/var/db/containers/storage/db.sql
+/var/db/containers/storage/defaultNetworkBackend
+/var/db/containers/storage/storage.lock
+/var/db/containers/storage/userns.lock
+/var/db/containers/storage/zfs-containers/containers.lock
+/var/db/containers/storage/zfs-containers/dac733521be73f95b7346dbe43562aadc7266c5205c996311ce5dec483bf8725/userdata/buildah.json
+/var/db/containers/storage/zfs-containers/volatile-containers.json
+/var/db/containers/storage/zfs-images/f81c971736c66436f90455b90e866f7e80d09ca6abda4d818abc589cd4eb05ee/=bWFuaWZlc3Qtc2hhMjU2OjI3YTBlYzhjMmRhODZkZjE0YjRjZWI3MDEwNDE0OTlmNWEzOTBmNzJjY2RmNjc2OWM2NzdjOWZmNjEyNDhmOGU=
+/var/db/containers/storage/zfs-images/f81c971736c66436f90455b90e866f7e80d09ca6abda4d818abc589cd4eb05ee/=bWFuaWZlc3Qtc2hhMjU2OmU1ZjI0Y2RmMDIyZTIzYzE5OGYwODE5NDRkMWNjNzg5NzVkY2FkYzQxOTE3MDRjOWFiYjc2MzgzMjY5NjhkZmU=
+/var/db/containers/storage/zfs-images/f81c971736c66436f90455b90e866f7e80d09ca6abda4d818abc589cd4eb05ee/=c2hhMjU2OmY4MWM5NzE3MzZjNjY0MzZmOTA0NTViOTBlODY2ZjdlODBkMDljYTZhYmRhNGQ4MThhYmM1ODljZDRlYjA1ZWU=
+/var/db/containers/storage/zfs-images/f81c971736c66436f90455b90e866f7e80d09ca6abda4d818abc589cd4eb05ee/manifest
+/var/db/containers/storage/zfs-images/images.json
+/var/db/containers/storage/zfs-images/images.lock
+/var/db/containers/storage/zfs-layers/c0e5c047951147a952903acd94d5044a912a8390be3f3f26d3d066b275ae7234.tar-split.gz
+/var/db/containers/storage/zfs-layers/layers.json
+/var/db/containers/storage/zfs-layers/layers.lock
+/var/db/containers/storage/zfs-layers/volatile-layers.json
+....
+
+* TODO how can we see whats in the layers?
+
+=== Signing Images (WIP)
+
+*DRAFT - NOT FINAL YET* - Registeries are not responsible for signing
+container images or verifying their signatures - Who then is responsible
+? - What are the methods of Signing: - :white_check_mark: GNU Privacy
+Guard (https://gnupg.org/[GPG]) - :white_check_mark:
+https://github.com/containers/podman/blob/main/docs/tutorials/image_signing.md[How
+to sign and distribute container images using Podman] -
+https://www.sigstore.dev/[Sigstore] (Cosign
+https://docs.sigstore.dev/signing/quickstart/[1]
+https://github.com/sigstore/cosign/tree/main/doc[2] ?) - What should be
+then the flow of: - Signing ? - Distributing/Publishing Signatures ? -
+Verifying Signatures ?
+
+=== Local Registry
+
+Using the prior installation, login, and push an image:
+
+....
+### the typical release artifacts
+# podman push c5f3e77557a9 ghcr.io/freebsd/freebsd-runtime:14.3p0
+# podman push 7876fe59dbb3 ghcr.io/freebsd/freebsd-static:14.3p0
+# podman push ebf7538b22f4 ghcr.io/freebsd/freebsd-dynamic:14.3p0
+....
+
+==== Immutable Tags & Official Releases
+
+pkg-base is the source for building OCI images, so let’s keep the
+nomenclature as close as possible. Peek in these URLs to see what’s
+what:
+
+* https://pkg.freebsd.org/FreeBSD:14:amd64/base_release_2/
+** FreeBSD-clibs-14.3p2.pkg
+* https://pkg.freebsd.org/FreeBSD:14:amd64/base_latest/
+** FreeBSD-clibs-14.snap20250325035941.pkg
+* https://pkg.freebsd.org/FreeBSD:14:aarch64/base_release_2/
+** FreeBSD-clibs-15.snap20250323122233.pkg
+* https://pkg.freebsd.org/FreeBSD:15:amd64/base_latest/
+** FreeBSD-clibs-15.snap20250323120318.pkg
+
+All images can be clearly mapped by the MAJOR version to a FreeBSD
+release cycle:
+
+* no minor version -> mutable tag, latest off the RELENG train (14.3
+now, soon 14.3)
+* minor & major -> immutable tag, official RELEASE
+* minor & major & patchlevel -> immutable tag, official RELEASE
+** is that actually true? maybe emaste@ knows?
+** which team owns this and is it a once-off after each patch release?
+** we dont want a weekly checksum that changes
+* `+freebsd-runtime:14.3+` is the official RELEASE
+* `+freebsd-runtime:14+` is sliding RELENG train
+* `+freebsd-runtime:XX.latest+` -> you’re using a STABLE or CURRENT
+
+==== Fixed Tags for Deploy (Paranoid Ops)
+
+* the major release cycle starts with `+freebsd-runtime:14.0+`, then
+`+freebsd-minimal:14.1+`, etc
+* the`+freebsd-runtime:14.x+` tag does not move
+** WYSIWYG
+** you need to choose to patch
+** this means rebuilding the image
+* we get the sweet patches with `+FreeBSD-14.3p1.pkg+`
+* rebuild your image to move from `+freebsd-runtime:14.3+` ->
+`+freebsd-minimal:14.2p1+`
+
+==== Mutable Tags For Releases (CI use case)
+
+* the`+freebsd-runtime:14+` will slide along the RELENG train
+* we start off on 14.3-RELEASE = `+FreeBSD-14.2.pkg+`
+** `+freebsd-runtime:14.3+` -> `+FreeBSD 14.2-RELEASE+`
+* then we get the sweet patches with `+FreeBSD-14.3p1.pkg+`
+** `+freebsd-runtime:14+` -> `+FreeBSD 14.3-RELEASE-p1+`
+* eventually 14.3-RELEASE arrives = `+FreeBSD-14.3.pkg+`
+** `+freebsd-runtime:14+` -> `+FreeBSD 14.3-RELEASE+`
+
+==== Mutable Tags For STABLE & CURRENT (CI use case)
+
+* derived from `+/usr/src/Makefile.inc1+`
+* the `+freebsd-runtime:14.snapYYYYMMDDHHMMSS+` is immutable because
+this matches pkg-base naming also get used to it!
+* use `+freebsd-runtime:14-latest+` to slide along STABLE or CURRENT
+
+....
+### the latest -pX image would be tagged as 14.3
+# podman push c5f3e77557a9 ghcr.io/freebsd/freebsd-runtime:14.3
+# podman push 7876fe59dbb3 ghcr.io/freebsd/freebsd-static:14.3
+# podman push ebf7538b22f4 ghcr.io/freebsd/freebsd-dynamic:14.3
+### the latest RELEASE as cut from the 14/stable lineage
+# podman push ...          ghcr.io/freebsd/freebsd-runtime:14-latest
+# podman push ...          ghcr.io/freebsd/freebsd-static:14-latest
+# podman push ...          ghcr.io/freebsd/freebsd-dynamic:14-latest
+### the latest RELEASE as cut from the 15/current lineage
+# podman push ...          ghcr.io/freebsd/freebsd-runtime:15-latest
+# podman push ...          ghcr.io/freebsd/freebsd-static:15-latest
+# podman push ...          ghcr.io/freebsd/freebsd-dynamic:15-latest
+....
+
+=== Multi-architecture Builds
+
+* RELENG builds will always be separate artefacts
+* `+image list+` is a JSON blob comprising the image hash + some
+metadata
+* use either https://buildah.io/[buildah] or https://podman.io/[podman]
+to merge them
+** `+podman manifest create+` to make an empty one
+** `+podman manifest add+` includes the image
+** `+buildah manifest push+`
+* moving these around is what
+https://github.com/containers/skopeo[skopeo] is for
+
+....
+# buildah push --tls-verify=false  --creds admin \
+    freebsd14.0-base docker://localhost:5000/freebsd:14.0-base
+Password: ...
+
+Getting image source signatures
+Copying blob 8bf3dc12f14d skipped: already exists
+Copying blob a18920fa617e skipped: already exists
+Copying blob 188e5e166924 skipped: already exists
+Copying config cc353a2011 done   |
+Writing manifest to image destination
+....
+
+This time, the login will be saved in
+`+/root/.config/containers/auth.json+`.
+
+....
+# buildah login --tls-verify=false localhost:5000
+Username: admin
+Password:
+Login Succeeded!
+
+# buildah push --tls-verify=false freebsd14.0-small docker://localhost:5000/freebsd:14.0-small
+Getting image source signatures
+Copying blob 05a151490b6d done   |
+Copying blob 42509cf52690 done   |
+Copying blob d6344e14ba8a done   |
+Copying blob aca51be9eadf done   |
+Copying blob a94388b7abab done   |
+Copying config 0af3b8c4c2 done   |
+Writing manifest to image destination
+....
+
+== Building Custom Images
+
+Essentially we "`fork`" a new image off an existing one, make
+modifications, and eventually commit our changes, and push them to a
+registry for re-use.
+
+In this section, we’ll create an Apache CouchDB image. It requires a
+handful of packages, but also has some tricky runtime requirements:
+
+* `+/var/db/couchdb3/+` for database files
+* config files in `+/etc/rc.conf.d/couchdb+` and
+`+/usr/local/etc/couchdb/+`.
+* in my deployment, an overlay IPv6 network to allow other CouchDB
+cluster nodes to network with each other
+
+=== Forking an Existing Image
+
+To keep the image clean, we’ll mount additional tmpfs volumes into the
+temporary building image.
+
+....
+# buildah from  \
+    --volume /var/cache/pkg:/var/cache/pkg \
+    --volume /tmp:/var/tmp \
+    --volume /tmp:/tmp \
+    --name couch-builder \
+    localhost/freebsd14.0-small:latest
+couch-builder
+# buildah containers
+CONTAINER ID  BUILDER  IMAGE ID     IMAGE NAME                       CONTAINER NAME
+fde7287590ed     *     4bc70197ea21 localhost/freebsd14.0-small:l... couch-builder
+....
+
+=== Customising Our Image
+
+....
+# buildah run couch-builder pkg install -yr FreeBSD databases/couchdb3
+Bootstrapping pkg from pkg+http://pkg.FreeBSD.org/FreeBSD:14:amd64/latest, please wait...
+[fde7287590ed] Installing pkg-1.20.9_1...
+[fde7287590ed] Extracting pkg-1.20.9_1: 100%
+Updating FreeBSD repository catalogue...
+[fde7287590ed] Fetching meta.conf: 100%    163 B   0.2kB/s    00:01
+[fde7287590ed] Fetching packagesite.pkg: 100%    7 MiB   7.4MB/s    00:01
+Processing entries: 100%
+FreeBSD repository update completed. 34057 packages processed.
+All repositories are up to date.
+Updating database digests format: 100%
+The following 8 package(s) will be affected (of 0 checked):
+
+New packages to be INSTALLED:
+        couchdb3: 3.3.3_1 [FreeBSD]
+        erlang-runtime25: 25.3.2.10 [FreeBSD]
+...
+[fde7287590ed] [7/8] Installing erlang-runtime25-25.3.2.10...
+[fde7287590ed] [7/8] Extracting erlang-runtime25-25.3.2.10: 100%
+[fde7287590ed] [8/8] Installing couchdb3-3.3.3_1...
+...
+For more information see
+http://docs.couchdb.org/en/latest/setup/index.html
+....
+
+The default config files installed during `+pkg(1)+` are not wanted, so
+let’s remove them. Also, add an `+/etc.rc.conf.d/couchdb3+` file to
+ensure that Couch is started on boot.
+
+....
+# buildah run couch-builder rm -rf \
+    /usr/local/etc/couchdb3/local.ini \
+    /usr/local/etc/couchdb3/local.ini
+
+# buildah run couch-builder /bin/sh
+# pwd
+/
+# printf 'couchdb3_enable=YES\ncouchdb3_oomprotect=ALL\n' | tee /etc/rc.conf.d/couchdb3
+couchdb3_enable=YES
+couchdb3_oomprotect=ALL
+# exit
+....
+
+Note that `+buildah run+` allows running arbitrary commands in the
+container, and also just using a shell directly, similar to
+`+jexec(1)+`. Run `+mount+` and grep your container id to see the
+mountpoint:
+
+....
+# buildah containers
+CONTAINER ID  BUILDER  IMAGE ID     IMAGE NAME                       CONTAINER NAME
+132edd5445b9     *     4bc70197ea21 localhost/freebsd14.0-small:l... couch-builder
+
+# jls | grep 132edd5445b9
+    36   132edd5445b9  /var/db/containers/storage/zfs/graph/0554...
+....
+
+=== Inspecting Images
+
+This image should be usable now. It’s missing some metadata and tags,
+but but we can view its properties, and eventually commit (push) to a
+remote registry, to be used anywhere.
+
+....
+# buildah containers
+CONTAINER ID  BUILDER  IMAGE ID     IMAGE NAME                       CONTAINER NAME
+fde7287590ed     *     4bc70197ea21 localhost/freebsd14.0-small:l... couch-builder
+
+# buildah inspect couch-builder
+{
+    "Type": "buildah 0.0.1",
+    "FromImage": "localhost/freebsd14.0-small:latest-amd64",
+    "FromImageID": "4bc70197ea21c7fedb1ff0ff4e7cef3f0bc69f8d00c11fb4e976a25c0aa2a732",
+    "FromImageDigest": "sha256:83baa06dc1a9e826f500dfceeb8f331a2267b1959ee1bfb683207e7e5bd27c9e",
+...
+    "History": [
+        {
+            "created": "2024-04-09T00:00:00Z",
+            "created_by": "/bin/sh"
+        },
+        {
+            "created": "2024-04-09T00:00:00Z",
+            "created_by": "/bin/sh",
+            "comment": "FROM localhost/freebsd14.0-mtree:latest-amd64"
+        },
+        {
+            "created": "2024-04-09T00:00:00Z",
+            "created_by": "/bin/sh",
+            "comment": "FROM localhost/freebsd14.0-static:latest-amd64"
+        },
+        {
+            "created": "2024-04-09T00:00:00Z",
+            "created_by": "/bin/sh",
+            "comment": "FROM localhost/freebsd14.0-base:latest-amd64"
+        },
+        {
+            "created": "2024-04-09T00:00:00Z",
+            "created_by": "/bin/sh",
+            "comment": "FROM localhost/freebsd14.0-runtime:latest-amd64"
+        }
+    ],
+    "Devices": []
+}
+....
+
+Most of the JSON output has been removed above, apart from
+`+FromImage*+` keys that show its provenance, and the `+History+` object
+that shows the dependent layers required.
+
+=== Container Metadata (WIP)
+
+* whats the difference between metadata and tags?
+* when to use one over the other?
+
+....
+# buildah containers
+CONTAINER ID  BUILDER  IMAGE ID     IMAGE NAME                       CONTAINER NAME
+fde7287590ed     *     4bc70197ea21 localhost/freebsd14.0-small:l... couch-builder
+# buildah tag 4bc70197ea21 3.3.3 latest
+....
+
+=== Committing and Publishing Images (WIP)
+
+* what is difference between `+commit+` and `+push+` ?
+* seems that only `+push+` actually shows up on remote repo
+
+....
+# buildah commit couch-builder couchdb:3.3.3
+Getting image source signatures
+Copying blob 1643796dfb88 skipped: already exists
+Copying blob cc00286ea44e skipped: already exists
+Copying blob c30672e8f04b skipped: already exists
+Copying blob bdb2e98fd234 skipped: already exists
+Copying blob b1698910dc02 skipped: already exists
+Copying blob 7e7852284f41 skipped: already exists
+Copying config 7af22b0211 done   |
+Writing manifest to image destination
+7af22b021197c554c8a5b5a9af3d0879bad22bad543cef30d16d7d95d986eb57
+....
+
+=== TODO Using Containers with ZFS and Complex Networking
+
+* create a set of nested datasets to be mounted into the container
+
+....
+# zfs create -o jailed=on \
+    -o canmount=off \
+    -o mountpoint=/var/db/couchdb3 \
+    zroot/jailed/couchdb
+# zfs create zroot/jailed/couchdb/data
+# zfs create zroot/jailed/couchdb/views
+....
+
+* fetch container by tag and confirm its got the package inside
+
+....
+# podman pull ghcr.io/skunkwerks/couchdb:3.3.3
+Trying to pull ghcr.io/skunkwerks/couchdb:3.3.3...
+Getting image source signatures
+Copying blob 5f8b8c3299eb done   |
+Copying blob 52bf5d211a1f done   |
+Copying blob 95e5da2e6747 done   |
+Copying blob ccdaedb6e555 done   |
+Copying blob c100350252d2 done   |
+Copying blob 1f86f171a4f2 done   |
+Copying config 7af22b0211 done   |
+Writing manifest to image destination
+7af22b021197c554c8a5b5a9af3d0879bad22bad543cef30d16d7d95d986eb57
+
+# podman run ghcr.io/skunkwerks/couchdb:3.3.3 pkg info couchdb\*
+couchdb3-3.3.3_1
+....
+
+* run container, mounting volumes, and IPv6 address
+
+....
+... working on it!
+....
+
+=== Using and Testing arm64 images on amd64
+
+This is very convenient for validating and testing images after build.
+
+You can install the qemu-user-static (or qemu-user-static-devel), enable
+it and '`start`' with service(8) - this will register image activators
+for all the emulated architectures. With that, you can run the image by
+mounting the relevant qemu into the container:
+
+....
+$ uname -a
+FreeBSD herring.home.rabson.org 14.2-RELEASE-p1 FreeBSD 14.2-RELEASE-p1 GENERIC amd64
+$ sudo podman run -ti --rm --arch=arm64 -v /usr/local/bin/qemu-aarch64-static:/usr/local/bin/qemu-aarch64-static ghcr.io/freebsd/freebsd-runtime:14.snap uname -a
+FreeBSD 73d4049d10b2 14.2-RELEASE-p1 FreeBSD 14.2-RELEASE-p1 GENERIC arm64
+....
+
+It is possible to avoid the mounting nonsense but it requires a small
+change to qemu (https://github.com/qemu-bsd-user/qemu-bsd-user/pull/42)
+and the binmiscctl invocations in the service file need to have the
+'`–pre-open`' flag added.
+
+=== Manipulating Images
+
+== Issues And Problems
+
+==== how to mount tmpfs
+
+* `+podman run --mount type=tmpfs...+` doesn’t work
+
+....
+# podman run -t --mount type=tmpfs,destination=/var/db/couchdb ghcr.io/skunkwerks/couchdb:3.3.3 df -h
+Filesystem                                                                                                                            Size    Used   Avail Capacity  Mounted on
+zroot/containers/4a3cdf1734c84263fc0aaa5e1ddea2beb0c95190fdd67f886c65497fab1312c3                                                     961G    272M    961G     0%    /
+devfs                                                                                                                                 1.0K      0B    1.0K     0%    /dev
+fdescfs                                                                                                                               1.0K      0B    1.0K     0%    /dev/fd
+/var/run/containers/storage/zfs-containers/504e8d18b56bece2d9c321b1e7fd24785fe035671b6eb80eceb4888259efb722/userdata/hosts            964G    2.7G    961G     0%    /etc/hosts
+/var/run/containers/storage/zfs-containers/504e8d18b56bece2d9c321b1e7fd24785fe035671b6eb80eceb4888259efb722/userdata/resolv.conf      964G    2.7G    961G     0%    /etc/resolv.conf
+/var/run/containers/storage/zfs-containers/504e8d18b56bece2d9c321b1e7fd24785fe035671b6eb80eceb4888259efb722/userdata/.containerenv    964G    2.7G    961G     0%    /var/run/.containerenv
+....
+
+=== `+ipv6+` doesn’t work
+
+* see https://www.redhat.com/sysadmin/podman-new-network-stack
+* and
+https://developers.redhat.com/articles/2022/08/10/how-conifgure-podman-40-ipv6
+* I have an existing ipv6 overlay network (zerotier, basically a smart
+tap if)
+* I want to "`give`" a specific ip6 to the container so it can reach
+other couchdb containers in the cluster, on different teams
+* I manually made a `+zerotier+` network, it doesn’t need a bridge
+* hangs on tearing down the container
+
+....
+# podman run -t --ip6 fca2:927d:4d7c:5005:f22b::3  ghcr.io/skunkwerks/couchdb:3.3.3 ifconfig
+Error: requested static ip fca2:927d:4d7c:5005:f22b::3 not in any subnet on network podman
+
+# podman info |grep -i networkbackend
+  networkBackend: cni
+  networkBackendInfo:
+
+# podman network inspect podman
+[
+     {
+          "name": "podman",
+          "id": "2f259bab93aaaaa2542ba43ef33eb990d0999ee1b9924b557b7be53c0b7a1bb9",
+          "driver": "bridge",
+          "network_interface": "cni-podman0",
+          "created": "2024-04-10T11:58:10.506628503Z",
+          "subnets": [
+               {
+                    "subnet": "10.88.0.0/16",
+                    "gateway": "10.88.0.1"
+               }
+          ],
+          "ipv6_enabled": false, <----------------------------
+          "internal": false,
+          "dns_enabled": false,
+          "ipam_options": {
+               "driver": "host-local"
+          }
+     }
+]
+
+# podman network create --ipv6 zerotier
+zerotier
+# podman network inspect zerotier
+[
+     {
+          "name": "jails",
+          "id": "4b798d7395fb72fac619638be2fab07326ddb1cdec8c3827a22ede623b8a7af6",
+          "driver": "bridge",
+          "network_interface": "cni-podman1",
+          "created": "2024-04-10T11:58:51.536122Z",
+          "subnets": [
+               {
+                    "subnet": "10.89.0.0/24",
+                    "gateway": "10.89.0.1"
+               },
+               {
+                    "subnet": "fdfa:b524:bd5f:51b1::/64",
+                    "gateway": "fdfa:b524:bd5f:51b1::1"
+               }
+          ],
+          "ipv6_enabled": true,  <--------------- good
+          "internal": false,
+          "dns_enabled": false,
+          "ipam_options": {
+               "driver": "host-local"
+          }
+     }
+]
+....
+
+== References
+
+=== General
+
+* https://docs.skunkwerks.at/s/fUiAmi4pE[this doc]
+* https://github.com/containers[Containers]
+** https://github.com/containers/buildah/tree/main/docs/containertools[Container
+Tools Guide]
+** https://github.com/containers/image/tree/main[Containers Image]
+** https://github.com/containers/image/tree/main/docs[Containers Image
+Docs]
+** https://github.com/containers/podman[Podman]
+* https://podman.io/docs/installation#installing-on-freebsd-140[Installing
+on FreeBSD 14.0]
+* https://docs.docker.com/registry/[Docker Registry] which has been
+donated to [CNCF] and became known as
+https://distribution.github.io/distribution/[(CNCF) Distribution]
+
+=== Porting
+
+* https://reviews.freebsd.org/D37324
+* https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=254645
+* https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=267184
+* https://github.com/freebsd/freebsd-ci/pull/126
+* https://github.com/opencontainers/umoci/issues/364
+* https://github.com/oras-project/oras looks useful, trivial patch for
+FreeBSD
+* https://github.com/opencontainers/umoci people use this for
+(re)packing
+
+=== Hacking & Using
+
+* https://akhramov.github.io/posts/2021-09-16-FreeBSD-OCI-jails.html
+* https://gitlab.com/runhyve/jailer/-/snippets/2082864
+* https://gitlab.com/runhyve/jailer/-/snippets/2082864
+* https://freshports.org/sysutils/docker-registry
+
+=== Building Images
+
+* https://github.com/dfr/freebsd-images has a `+build.sh+` script that
+will auto-build all the images you require from official sources
+* https://medium.com/oracledevs/building-multi-architecture-containers-on-oci-with-podman-67d49a8b965e
+
+=== Using Registries
+
+* https://redhat-scholars.github.io/containers-tutorial/containers-tutorial/buildah.html
+* https://buildah.io/blogs/2018/01/26/using-image-registries-with-buildah.html
+* https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#authenticating-to-the-container-registry
+* https://docs.oracle.com/en/operating-systems/oracle-linux/podman/podman-BuildingImagesWithBuildah.html#buildah-containers
+* https://docs.public.oneportal.content.oci.oraclecloud.com/en-us/iaas/Content/Registry/home.htm
+* https://www.oracle.com/webfolder/technetwork/tutorials/obe/oci/registry/index.html
+* https://enabling-cloud.github.io/oci-learning/manual/OCIRegistry.html
+* https://stackoverflow.com/questions/73879886/how-to-list-all-images-from-an-account-in-github-container-registry
+* https://www.douglashellinger.com/explainer/container-oci-registry/pull-a-public-container-image/
+* https://podman.io/blogs/2021/10/11/multiarch
+
+=== Linux Specific
+
+* https://projectatomic.io/blog/2018/03/the-many-ways-to-build-oci-images/
+* https://computingforgeeks.com/how-to-build-oci-docker-container-images-with-buildah/
+
+=== Trusted Content
+
+* https://docs.docker.com/trusted-content/
+* https://docs.digicert.com/en/software-trust-manager/signing-tools/container-signing-with-podman.html
+
+=== Quick Notes on Signing
+
+* you only need a _writable_ registry for signing
+`+/usr/local/etc/containers/registries.conf+`
+* `+/usr/local/etc/containers/registries.d/default.yaml+` tells us where
+to go to verify signatures (via external http server)
+* `+/usr/local/etc/containers/policy.json+` defines locally what keys
+are accepted
+* signatures are stored in files, e.g. inside container
+`+/var/lib/containers/sigstore+` and can be versioned in git
+
+== FAQ: Reported User Issues & Solutions
+
+* podman-nullfs-mounted files like `+/etc/resolv.conf+` and
+`+/etc/hosts+` gets in the way with error `+Cross-device link+` or
+similar, during `+pkg update+`
+** add `+--no-hosts+` and `+--dns 1.1.1.1+` to your container
+
+....
+[fd343e182fa5] [17/18] Extracting FreeBSD-runtime-14.3.b2.20250512234546: 100%
+pkg: Fail to rename /etc/.pkgtemp.hosts.VeIDrHM0sKN5 -> /etc/hosts:Cross-device link
+....
+
+* `+pkg install ...+` fails
+** see below, it’s complicated
+
+=== Checking Networking
+
+This could be anything - keep it simple! Start off with the rules from
+`+pf.conf+` provided in `+/usr/local/etc/containers/pf.conf.sample+`.
+
+The following steps starts off with a container that specifies its own
+DNS resolver, not using the host’s provided one, passes an env var in
+for pkg, and tries to fetch a file over http.
+
+....
+jail@host# podman run \
+    --no-hosts \
+    --dns 1.1.1.1 \
+    --env ASSUME_ALWAYS_YES=1 \
+    -it --rm \
+    ghcr.io/freebsd/freebsd-runtime:14.3 \
+    /bin/sh
+
+### do we have a sensible route?
+# route show 1.1.1.1
+   route to: 1.1.1.1
+destination: default
+       mask: default
+    gateway: 10.88.0.1
+        fib: 0
+  interface: eth0
+      flags: <UP,GATEWAY,DONE,STATIC>
+ recvpipe  sendpipe  ssthresh  rtt,msec    mtu        weight    expire
+       0         0         0         0      9000         1         0
+
+### can we ping the gateway?
+# ping -c 3 10.88.0.1
+PING 10.88.0.1 (10.88.0.1): 56 data bytes
+64 bytes from 10.88.0.1: icmp_seq=0 ttl=64 time=0.083 ms
+64 bytes from 10.88.0.1: icmp_seq=1 ttl=64 time=0.076 ms
+64 bytes from 10.88.0.1: icmp_seq=2 ttl=64 time=0.089 ms
+
+--- 10.88.0.1 ping statistics ---
+3 packets transmitted, 3 packets received, 0.0% packet loss
+round-trip min/avg/max/stddev = 0.076/0.083/0.089/0.006 ms
+
+### does ICMP to the world work?
+# ping -c 3 1.1.1.1
+PING 1.1.1.1 (1.1.1.1): 56 data bytes
+64 bytes from 1.1.1.1: icmp_seq=0 ttl=60 time=0.920 ms
+64 bytes from 1.1.1.1: icmp_seq=1 ttl=60 time=0.882 ms
+64 bytes from 1.1.1.1: icmp_seq=2 ttl=60 time=0.876 ms
+
+--- 1.1.1.1 ping statistics ---
+3 packets transmitted, 3 packets received, 0.0% packet loss
+round-trip min/avg/max/stddev = 0.876/0.893/0.920/0.020 ms
+
+### does tcp and TLS work?
+# fetch -v http://1.1.1.1/
+resolving server address: 1.1.1.1:80
+requesting http://1.1.1.1/
+301 redirect to https://1.1.1.1/
+resolving server address: 1.1.1.1:443
+SSL options: 82004850
+Peer verification enabled
+Using OpenSSL default CA cert file and path
+Verify hostname
+TLSv1.3 connection established using TLS_AES_256_GCM_SHA384
+Certificate subject: /C=US/ST=California/L=San Francisco/O=Cloudflare, Inc./CN=cloudflare-dns.com
+Certificate issuer: /C=US/O=DigiCert Inc/CN=DigiCert Global G2 TLS RSA SHA256 2020 CA1
+requesting https://1.1.1.1/
+301 redirect to https://one.one.one.one/
+resolving server address: one.one.one.one:443
+SSL options: 82004850
+Peer verification enabled
+Using OpenSSL default CA cert file and path
+Verify hostname
+TLSv1.3 connection established using TLS_AES_256_GCM_SHA384
+Certificate subject: /C=US/ST=California/L=San Francisco/O=Cloudflare, Inc./CN=cloudflare-dns.com
+Certificate issuer: /C=US/O=DigiCert Inc/CN=DigiCert Global G2 TLS RSA SHA256 2020 CA1
+requesting https://one.one.one.one/
+local size / mtime: 56614 / 1759486748
+remote size / mtime: 56614 / 0
+fetch.out                                               55 kB   21 MBps    00s
+
+### does pkg work? the -d is for Debugging
+# pkg -dd bootstrap -r FreeBSD
+....
+
+* if `+ping+` fails, check your firewall rules for blocking ICMP
+* if `+fetch+` fails, check your firewall rules for blocking TCP on 80
+and 443
+* if `+pkg+` fails, but ICMP & TCP work, this could be a fragmentation
+or MTU problem
+** add `+set reassemble yes no-df+` to your `+/etc/pf.conf+` and restart
+it
+* if it still fails, see below
+
+==== Blocked Packets, with`+pflog+` and `+tcpdump+`
+
+Any complex firewall ruleset will have block and pass rules. The pflog
+device will log src/dest ip & port, for any rule that blocks traffic,
+that has `+block log+` listed.
+
+* add `+log+` to all of your block rules
+* run `+service pflog onerestart+` to enable pflog
+* check for blocked packets
+** `+tcpdump -vvveni pflog0 icmp or net 10.88.0.0/16+`
+* also check for passing packets to your final `+$DEST_IP+`
+** `+tcpdump -vvveni vtnet0 icmp or $DEST_IP+`
+
+In this MTU failure case, `+tcpdump(1)+` reports:
+
+....
+# tcpdump -vvveni vtnet0 host 134.70.104.1
+10.0.0.122 > 134.70.104.1: ICMP 10.0.0.122 unreachable - need to frag (mtu 1500), length 576
+  (tos 0x0, ttl 61, id 40019, offset 0, flags [DF], proto TCP (6), length 2948, bad cksum 9c5f (->9d5f)!)
+....
+
+Lowering MTU on bridge, external interface didn’t help. So there must be
+further changes required within the container itself.
+
+=== checking MTU consistency
+
+* Read
+https://www.cisco.com/c/en/us/support/docs/ip/generic-routing-encapsulation-gre/25885-pmtud-ipfrag.html
+carefully
+* remove any & all sysctls relating to `+net.inet+`
+* reboot
+
+In the following example, `+vtnet0+` has MTU 9000, but the bridge and
+containers have MTU 1500. In general, coerce your internal layout to
+match the external network, most often, yours is the problem.
+
+....
+### jail host
+# ifconfig
+vtnet0: flags=1008843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST,LOWER_UP> metric 0 mtu 9000
+        options=4c07bb<RXCSUM,TXCSUM,VLAN_MTU,VLAN_HWTAGGING,JUMBO_MTU,VLAN_HWCSUM,TSO4,TSO6,LRO,VLAN_HWTSO,LINKSTATE,TXCSUM_IPV6>
+        ether 02:00:17:10:ca:45
+        inet 10.0.0.122 netmask 0xffffff00 broadcast 10.0.0.255
+        media: Ethernet autoselect (10Gbase-T <full-duplex>)
+        status: active
+        nd6 options=29<PERFORMNUD,IFDISABLED,AUTO_LINKLOCAL>
+lo0: flags=1008049<UP,LOOPBACK,RUNNING,MULTICAST,LOWER_UP> metric 0 mtu 16384
+        options=680003<RXCSUM,TXCSUM,LINKSTATE,RXCSUM_IPV6,TXCSUM_IPV6>
+        inet 127.0.0.1 netmask 0xff000000
+        inet6 ::1 prefixlen 128
+        inet6 fe80::1%lo0 prefixlen 64 scopeid 0x2
+        groups: lo
+        nd6 options=21<PERFORMNUD,AUTO_LINKLOCAL>
+cni-podman0: flags=1008843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST,LOWER_UP> metric 0 mtu 1500
+        options=0
+        ether 58:9c:fc:00:04:63
+        inet 10.88.0.1 netmask 0xffff0000 broadcast 10.88.255.255
+        id 00:00:00:00:00:00 priority 32768 hellotime 2 fwddelay 15
+        maxage 20 holdcnt 6 proto rstp maxaddr 2000 timeout 1200
+        root id 00:00:00:00:00:00 priority 32768 ifcost 0 port 0
+        member: vnet22fc8dd7 flags=143<LEARNING,DISCOVER,AUTOEDGE,AUTOPTP>
+                ifmaxaddr 0 port 6 priority 128 path cost 2000
+        groups: bridge
+        nd6 options=9<PERFORMNUD,IFDISABLED>
+vnet22fc8dd7: flags=1008943<UP,BROADCAST,RUNNING,PROMISC,SIMPLEX,MULTICAST,LOWER_UP> metric 0 mtu 1500
+        description: associated with jail: 06fc02aa3b8a74348a97068cdc92c8c2742860f3a692777f892ddc0ac78b78b8 as nic: eth0
+        options=8<VLAN_MTU>
+        ether 02:42:7f:a8:b9:0a
+        groups: epair
+        media: Ethernet 10Gbase-T (10Gbase-T <full-duplex>)
+        status: active
+        nd6 options=29<PERFORMNUD,IFDISABLED,AUTO_LINKLOCAL>
+....
+
+....
+### in container
+# podman run -it --rm ghcr.io/freebsd/freebsd-runtime:14.2 /sbin/ifconfig
+lo0: flags=1008049<UP,LOOPBACK,RUNNING,MULTICAST,LOWER_UP> metric 0 mtu 16384
+        options=680003<RXCSUM,TXCSUM,LINKSTATE,RXCSUM_IPV6,TXCSUM_IPV6>
+        inet 127.0.0.1 netmask 0x0
+        inet6 ::1 prefixlen 128
+        inet6 fe80::1%lo0 prefixlen 64 scopeid 0x8
+        groups: lo
+        nd6 options=21<PERFORMNUD,AUTO_LINKLOCAL>
+eth0: flags=1008843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST,LOWER_UP> metric 0 mtu 1500
+        options=8<VLAN_MTU>
+        ether 02:bf:bb:bb:dc:0b
+        inet 10.88.0.8 netmask 0xffff0000 broadcast 10.88.255.255
+        groups: epair
+        media: Ethernet 10Gbase-T (10Gbase-T <full-duplex>)
+        status: active
+        nd6 options=29<PERFORMNUD,IFDISABLED,AUTO_LINKLOCAL>
+....
+
+=== Fixing MTU inconsistencies
+
+Bridges & epairs should automatically align MTU if ICMP4/6 traffic is
+allowed to pass.
+
+In some cloud environments, `+set reassemble yes no-df+` may be required
+in `+/etc/pf.conf+` as well.
+
+In this scenario, it was sufficient to align MTU on all 3 sides (primary
+NIC, container bridge, container):
+
+....
+### already set by upstream network provider
+# ifconfig vtnet0 mtu 9000
+# ifconfig cni-podman0 mtu 9000
+### and in the container
+# ifconfig eth0 mtu 9000
+....
+
+An issue is that the epairs & bridge used by podman are ephemeral, these
+will need to be set for each bridge creation, and each container.
+
+[[Container-compatible Tools]]
+== OCI Container compatible Tools
+
+The various Open Container Initiative Specifications have enabled a wide range of diverse tools, that are mostly compatible out of the box with FreeBSD's OCI Container images and tooling.
+
+Below is a list of community-ported and tested OCI Container Tools
+
+.Podman-compatible tools
+[options="header", cols="1,1,1,1"]
+|===
+| Name | License | Package | Documentation
+
+| Podman Desktop
+| BSD-3
+| package:deskutils/podman-desktop[]
+| link:https://podman-desktop.io/[Documentation]
+
+|===
