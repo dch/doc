@@ -110,6 +110,7 @@ SKIP_LANGS+=    ${a}
 
 all: requirements starting-message generate-pgpkeys-txt build
 run: requirements starting-message generate-pgpkeys-txt run-local
+run-https: requirements starting-message generate-pgpkeys-txt
 
 # clean does not call pdf-clean as that is a subset of hugo-clean
 clean: hugo-clean pgp-clean
@@ -146,6 +147,10 @@ static/pgpkeys/pgpkeys.txt: static/pgpkeys/*key
 run-local: .PHONY
 	HUGO_DISABLELANGUAGES="${SKIP_LANGS}" ${HUGO_CMD} server \
 		${HUGO_ARGS} -D $(BIND:D--bind=$(BIND)) --baseURL="http://$(.HOST):1313"
+
+run-https: .PHONY
+	HUGO_DISABLELANGUAGES="${SKIP_LANGS}" ${HUGO_CMD} server \
+		${HUGO_ARGS} -D $(BIND:D--bind=$(BIND)) --baseURL="https://$(.HOST)"
 
 build: .PHONY
 	HUGO_DISABLELANGUAGES="${SKIP_LANGS}" ${HUGO_CMD} ${HUGO_ARGS}
