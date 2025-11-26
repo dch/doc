@@ -49,3 +49,66 @@ toc::[]
 include::../../../../../shared/asciidoctor.adoc[]
 endif::[]
 
+[[containers-synopsis]]
+== Synopsis
+
+The https://opencontainers.org/[Open Container Initiative], commonly
+referred to as `+OCI+`, provides a vendor and OS-agnostic way to describe,
+distribute, and run containers.
+
+The OCI specifications provide these in a way that can be used on many
+different operating systems, including FreeBSD.
+
+The underlying virtualization technology is still FreeBSD jails, with the
+same feature set, but OCI tooling enables additional ways of working, and
+constructing, container-based workloads.
+
+https://www.freebsd.org/releases/14.3R/announce/[14.3-RELEASE] and
+upwards, including
+https://download.freebsd.org/snapshots/OCI-IMAGES/[snapshots], now include
+OCI-compatible images, and the https://podman.io/[Podman] toolkit on
+FreeBSD is ready to use them, on both amd64 and arm64 architectures.
+
+For FreeBSD users familiar with jails, there is a loose analogy:
+
+* FreeBSD’s `+base.txz+` tarball is an example of a container image
+* the `+jail.conf+` file describes the desired container properties, or
+  `+Containerfile+`
+* use the `+jail ..+` command to run a container, given a filesystem path,
+  with the `+podman+` suite of tools
+
+By importing this container stack, FreeBSD users both benefit from common
+tooling, but also enjoy wide support across public and private container
+registries, and container-specific tooling and services.
+
+In the
+https://download.freebsd.org/releases/OCI-IMAGES/15.0-RELEASE/aarch64/Latest/[aarch64]
+and
+https://download.freebsd.org/releases/OCI-IMAGES/15.0-RELEASE/amd64/Latest/[amd64]
+download directories, you’ll see 5 official OCI-format images. The naming
+may be a little confusing at first, but should make sense once you start
+using them.
+
+The same images are also available through common public container
+registries, including https://hub.docker.com/u/freebsd[Docker Hub], and
+https://github.com/orgs/freebsd/packages[Github Container Registry], but
+for the strongest chain of trust, you should fetch your image directly
+from https://download.freebsd.org/releases[Official FreeBSD Releases], and
+import them to your local system.
+
+Each image comprises a subset of a standard FreeBSD `+base.txz+` release
+tarball, for various use cases, and the usual FreeBSD `+CHECKSUM.*+`
+files, that can be verified against the PGP-signed release announcement.
+This gives a very strong chain of provenance, directly verifiable from the
+FreeBSD release team.
+
+....
+CHECKSUM.SHA256
+CHECKSUM.SHA512
+FreeBSD-15.0-RELEASE-amd64-container-image-static.txz
+FreeBSD-15.0-RELEASE-amd64-container-image-dynamic.txz
+FreeBSD-15.0-RELEASE-amd64-container-image-runtime.txz
+FreeBSD-15.0-RELEASE-amd64-container-image-notoolchain.txz
+FreeBSD-15.0-RELEASE-amd64-container-image-toolchain.txz
+....
+
